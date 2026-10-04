@@ -33,9 +33,7 @@ def test_normalize_title(raw: str, expected: str) -> None:
 def test_artist_names_splits_collaborations() -> None:
     assert artist_names("Lil Nas X & Billy Ray Cyrus") >= {"lil nas x", "billy ray cyrus"}
     assert artist_names("Calvin Harris, Dua Lipa") >= {"calvin harris", "dua lipa"}
-    assert "florence and the machine" in artist_names("Florence + the Machine") or (
-        "florence the machine" in artist_names("Florence + the Machine")
-    )
+    assert "florence the machine" in artist_names("Florence + the Machine")
 
 
 QUEEN = track(
@@ -59,8 +57,29 @@ def test_cover_scores_below_threshold() -> None:
     assert score(QUEEN, c) < THRESHOLD
 
 
+def test_cover_at_similar_duration_scores_below_threshold() -> None:
+    c = cand(
+        "v2b",
+        "Bohemian Rhapsody",
+        ("Panic! At The Disco",),
+        album="Suicide Squad",
+        duration_s=355,
+    )
+    assert score(QUEEN, c) < THRESHOLD
+
+
 def test_live_version_scores_below_threshold() -> None:
     c = cand("v3", "Bohemian Rhapsody (Live Aid)", ("Queen",), album="Live Aid", duration_s=140)
+    assert score(QUEEN, c) < THRESHOLD
+
+
+def test_live_version_with_same_duration_scores_below_threshold() -> None:
+    c = cand("v3b", "Bohemian Rhapsody (Live Aid)", ("Queen",), album="Live Aid", duration_s=355)
+    assert score(QUEEN, c) < THRESHOLD
+
+
+def test_live_version_with_unknown_duration_scores_below_threshold() -> None:
+    c = cand("v3c", "Bohemian Rhapsody (Live Aid)", ("Queen",), album="Live Aid", duration_s=None)
     assert score(QUEEN, c) < THRESHOLD
 
 
@@ -90,6 +109,16 @@ def test_choose_same_song_on_two_albums_is_not_ambiguous() -> None:
     res = choose(QUEEN, results)
     assert isinstance(res, Matched)
     assert res.video_id == "album"
+
+
+def test_remix_vs_remix_not_ambiguous() -> None:
+    t = track(4, title="Song (Remix)", artist="Artist", album="", duration_ms=200_000)
+    results = [
+        cand("v1", "Song (Remix)", ("Artist",), album=None, duration_s=200),
+        cand("v2", "Song (Remix)", ("Artist",), album=None, duration_s=202),
+    ]
+    res = choose(t, results)
+    assert isinstance(res, Matched)
 
 
 def test_choose_ambiguous_when_close_scores_differ_in_title() -> None:

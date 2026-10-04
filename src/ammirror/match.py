@@ -14,6 +14,19 @@ from ammirror.models import (
 
 THRESHOLD = 0.75
 MARGIN = 0.05
+VERSION_MARKERS = frozenset(
+    {
+        "live",
+        "acoustic",
+        "remix",
+        "instrumental",
+        "karaoke",
+        "demo",
+        "cover",
+        "unplugged",
+        "acapella",
+    }
+)
 
 _FEAT = re.compile(r"\s*[\(\[](?:feat\.?|ft\.?|featuring|with)\s[^\)\]]*[\)\]]", re.IGNORECASE)
 _REMASTER = re.compile(
@@ -57,8 +70,11 @@ def _artist_score(apple_artist: str, ytm_artists: Sequence[str]) -> float:
 
 
 def score(track: AppleTrack, cand: YtmCandidate) -> float:
-    title = SequenceMatcher(None, normalize_title(track.title), normalize_title(cand.title)).ratio()
-    total = 0.5 * title + 0.3 * _artist_score(track.artist, cand.artists)
+    norm_track_title = normalize_title(track.title)
+    norm_cand_title = normalize_title(cand.title)
+    title = SequenceMatcher(None, norm_track_title, norm_cand_title).ratio()
+    artist_score_val = _artist_score(track.artist, cand.artists)
+    total = 0.5 * title + 0.3 * artist_score_val
     if track.duration_ms is None or cand.duration_s is None:
         total += 0.1
     else:
@@ -71,6 +87,12 @@ def score(track: AppleTrack, cand: YtmCandidate) -> float:
             total -= 0.3
     if cand.album and track.album and normalize_title(cand.album) == normalize_title(track.album):
         total += 0.05
+    track_markers = set(norm_track_title.split()) & VERSION_MARKERS
+    cand_markers = set(norm_cand_title.split()) & VERSION_MARKERS
+    if track_markers != cand_markers:
+        total -= 0.4
+    if artist_score_val < 0.5:
+        total -= 0.3
     return round(total, 4)
 
 
