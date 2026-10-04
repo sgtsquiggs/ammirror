@@ -1,6 +1,8 @@
+import stat
 from pathlib import Path
 
 import pytest
+import ytmusicapi
 from click.testing import CliRunner
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -56,3 +58,23 @@ def test_auth_apple_saves_token(paths: Paths, monkeypatch: pytest.MonkeyPatch) -
     assert result.exit_code == 0, result.output
     assert paths.apple_user_token_file.read_text() == "music-user-token"
     assert captured["dev"].count(".") == 2  # a JWT
+
+
+def test_auth_ytm_runs_setup(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, str] = {}
+
+    def fake_setup(filepath: str, headers_raw: str) -> str:
+        seen["headers"] = headers_raw
+        Path(filepath).write_text("{}")
+        return "{}"
+
+    monkeypatch.setattr(ytmusicapi, "setup", fake_setup)
+    result = CliRunner().invoke(cli, ["auth", "ytm"], input="cookie: abc\nuser-agent: x\n")
+    assert result.exit_code == 0, result.output
+    assert "cookie: abc" in seen["headers"]
+    assert stat.S_IMODE(paths.ytm_auth_file.stat().st_mode) == 0o600
+
+
+def test_auth_ytm_empty_input(paths: Paths) -> None:
+    result = CliRunner().invoke(cli, ["auth", "ytm"], input="")
+    assert result.exit_code == 2

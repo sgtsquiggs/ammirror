@@ -1,9 +1,11 @@
+import sys
 import traceback
 from dataclasses import dataclass
 from importlib.metadata import version
 from typing import Any
 
 import click
+import ytmusicapi
 
 from ammirror.apple.auth import run_auth_flow
 from ammirror.apple.token import load_developer_token
@@ -64,6 +66,32 @@ def auth_apple(ctx: click.Context) -> None:
     user_token = run_auth_flow(developer_token)
     write_secret(obj.paths.apple_user_token_file, user_token)
     click.echo(f"Saved Apple Music user token to {obj.paths.apple_user_token_file}")
+
+
+_YTM_HELP = """\
+1. Open https://music.youtube.com in your browser, signed in.
+2. Open DevTools (F12) → Network, filter for "browse", and click around until a
+   POST request to music.youtube.com/youtubei/v1/browse appears.
+3. Copy its request headers (Firefox: right-click → Copy Value → Copy Request Headers;
+   Chrome: Headers tab → Request Headers → select all and copy).
+4. Paste them here, then press Ctrl-D on an empty line.
+"""
+
+
+@auth.command("ytm")
+@click.pass_context
+def auth_ytm(ctx: click.Context) -> None:
+    """Save YouTube Music browser credentials from pasted request headers."""
+    obj = get_ctx(ctx)
+    click.echo(_YTM_HELP, err=True)
+    headers = sys.stdin.read()
+    if not headers.strip():
+        raise click.UsageError("no headers pasted")
+    target = obj.paths.ytm_auth_file
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    ytmusicapi.setup(filepath=str(target), headers_raw=headers)
+    target.chmod(0o600)
+    click.echo(f"Saved YouTube Music credentials to {target}")
 
 
 def main() -> None:
