@@ -1,6 +1,21 @@
+import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
+
+_PUNCTUATION = str.maketrans(
+    {
+        **dict.fromkeys("\u2018\u2019\u201a\u201b\u2032", "'"),
+        **dict.fromkeys("\u201c\u201d\u201e\u201f\u2033", '"'),
+        **dict.fromkeys("\u2013\u2014\u2212", "-"),
+    }
+)
+
+
+def normalize_playlist_name(name: str) -> str:
+    """Fold a playlist name so quote style, dash style, spacing and case do not matter."""
+    folded = unicodedata.normalize("NFKC", name).translate(_PUNCTUATION)
+    return " ".join(folded.split()).casefold()
 
 
 @dataclass(frozen=True)

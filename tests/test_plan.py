@@ -56,6 +56,16 @@ def test_select_playlists() -> None:
     assert select_playlists([a, b, c], ["A", "Z"]) == ([a, c], ["Z"])
 
 
+def test_select_playlists_ignores_quote_style_case_and_spacing() -> None:
+    curly = ApplePlaylist("p.1", "\u201893")
+    chill = ApplePlaylist("p.2", "Chill Mix")
+    dash = ApplePlaylist("p.3", "A \u2014 B")
+    assert select_playlists([curly, chill, dash], ["'93"]) == ([curly], [])
+    assert select_playlists([curly, chill, dash], ["CHILL MIX"]) == ([chill], [])
+    assert select_playlists([curly, chill, dash], ["Chill  Mix "]) == ([chill], [])
+    assert select_playlists([curly, chill, dash], ["a - b", "nope"]) == ([dash], ["nope"])
+
+
 def test_select_playlists_dedupes_preserving_order() -> None:
     a, b = ApplePlaylist("1", "A"), ApplePlaylist("2", "B")
     assert select_playlists([a, b], ["A", "A"]) == ([a], [])

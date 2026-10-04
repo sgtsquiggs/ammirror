@@ -23,6 +23,7 @@ from ammirror.models import (
     Unmatched,
     UnmatchedReason,
     YtmPlaylist,
+    normalize_playlist_name,
 )
 from ammirror.state import State
 from ammirror.ytm.client import YtmClient
@@ -53,7 +54,8 @@ def select_playlists(
         hits = list(available)
     else:
         for name in patterns:
-            named = [p for p in available if p.name == name]
+            wanted = normalize_playlist_name(name)
+            named = [p for p in available if normalize_playlist_name(p.name) == wanted]
             if not named:
                 missing.append(name)
             hits.extend(named)
