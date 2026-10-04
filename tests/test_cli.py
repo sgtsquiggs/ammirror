@@ -69,16 +69,24 @@ def test_auth_apple_saves_token(paths: Paths, monkeypatch: pytest.MonkeyPatch) -
 def test_auth_ytm_runs_setup(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, str] = {}
 
-    def fake_setup(filepath: str, headers_raw: str) -> str:
+    def fake_setup(headers_raw: str) -> str:
         seen["headers"] = headers_raw
-        Path(filepath).write_text("{}")
-        return "{}"
+        return '{"cookie": "abc"}'
 
     monkeypatch.setattr(ytmusicapi, "setup", fake_setup)
     result = CliRunner().invoke(cli, ["auth", "ytm"], input="cookie: abc\nuser-agent: x\n")
     assert result.exit_code == 0, result.output
     assert "cookie: abc" in seen["headers"]
+    assert paths.ytm_auth_file.read_text() == '{"cookie": "abc"}'
     assert stat.S_IMODE(paths.ytm_auth_file.stat().st_mode) == 0o600
+
+
+def test_auth_ytm_bad_headers_exit_2(paths: Paths) -> None:
+    # Real ytmusicapi.setup: it parses locally and rejects headers without x-goog-authuser.
+    result = CliRunner().invoke(cli, ["auth", "ytm"], input="cookie: abc\nuser-agent: x\n")
+    assert result.exit_code == 2
+    assert "could not parse pasted headers" in result.output
+    assert not paths.ytm_auth_file.exists()
 
 
 def test_auth_ytm_empty_input(paths: Paths) -> None:

@@ -37,7 +37,7 @@ private key from your Apple Developer account.
 5. Move the key into ammirror's config directory and restrict it:
 
    ```sh
-   mkdir -p ~/.config/ammirror
+   mkdir -m 700 -p ~/.config/ammirror
    mv ~/Downloads/AuthKey_XXXXXXXXXX.p8 ~/.config/ammirror/
    chmod 600 ~/.config/ammirror/AuthKey_XXXXXXXXXX.p8
    ```

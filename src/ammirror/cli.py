@@ -6,6 +6,7 @@ from typing import Any
 
 import click
 import ytmusicapi
+from ytmusicapi.exceptions import YTMusicError
 
 from ammirror.apple.auth import run_auth_flow
 from ammirror.apple.client import AppleClient, AppleLibrary
@@ -91,10 +92,14 @@ def auth_ytm(ctx: click.Context) -> None:
     headers = sys.stdin.read()
     if not headers.strip():
         raise click.UsageError("no headers pasted")
+    try:
+        # Without a filepath, setup only parses the headers and returns the JSON to save,
+        # so the credentials are written once, through write_secret, with mode 0600.
+        credentials = ytmusicapi.setup(headers_raw=headers)
+    except YTMusicError as e:
+        raise ConfigError(f"could not parse pasted headers: {e}") from e
     target = obj.paths.ytm_auth_file
-    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    ytmusicapi.setup(filepath=str(target), headers_raw=headers)
-    target.chmod(0o600)
+    write_secret(target, credentials)
     click.echo(f"Saved YouTube Music credentials to {target}")
 
 
