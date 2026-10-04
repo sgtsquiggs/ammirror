@@ -171,9 +171,12 @@ def resolve_tracks(
     *,
     retry_unmatched: bool = False,
 ) -> tuple[dict[str, Resolution], list[str]]:
-    """Map each track key to a resolution: pin/cache first, then search."""
+    """Map each track key to a resolution: pin/cache first, then search.
+
+    Returns the resolutions and an error message per failed search.
+    """
     resolutions: dict[str, Resolution] = {}
-    warnings: list[str] = []
+    errors: list[str] = []
     for t in tracks:
         if t.key in resolutions:
             continue
@@ -191,7 +194,7 @@ def resolve_tracks(
             try:
                 result = choose(t, ytm.search_songs(search_query(t)))
             except ServiceError as e:
-                warnings.append(f"search failed for {t.artist} - {t.title}: {e}")
+                errors.append(f"search failed for {t.artist} - {t.title}: {e}")
                 continue
         if isinstance(result, Matched):
             state.put_match(t.key, result.video_id, result.score, result.method)
@@ -199,7 +202,7 @@ def resolve_tracks(
         else:
             state.put_unmatched(t, result)
         resolutions[t.key] = result
-    return resolutions, warnings
+    return resolutions, errors
 
 
 @dataclass
@@ -251,8 +254,9 @@ def apply_plan(plan: Plan, ytm: YtmClient, state: State) -> ApplyResult:
 class SyncReport:
     plan: Plan
     result: ApplyResult | None
-    warnings: list[str]
+    warnings: list[str]  # informational; the run still succeeded
     unmatched: int
+    errors: list[str] = field(default_factory=list)  # skipped playlists, failed searches
 
 
 def run_sync(
@@ -265,6 +269,7 @@ def run_sync(
     retry_unmatched: bool = False,
 ) -> SyncReport:
     warnings: list[str] = []
+    errors: list[str] = []
     selected, missing = select_playlists(apple.library_playlists(), cfg.playlists)
     warnings += [f"no Apple Music playlist named '{name}'" for name in missing]
 
@@ -275,23 +280,23 @@ def run_sync(
         try:
             tracks = tuple(apple.playlist_tracks(p.id))
         except ServiceError as e:
-            warnings.append(f"skipped '{p.name}': {e}")
+            errors.append(f"skipped '{p.name}': {e}")
             continue
         mapping = mappings.get(p.id)
         if mapping:
             try:
                 ytm_playlists[mapping.ytm_playlist_id] = ytm.get_playlist(mapping.ytm_playlist_id)
             except ServiceError as e:
-                warnings.append(f"skipped '{p.name}': {e}")
+                errors.append(f"skipped '{p.name}': {e}")
                 continue
         fetched.append((p, tracks))
 
     favorites = tuple(apple.favorite_songs()) if cfg.likes else None
     all_tracks = [t for _, ts in fetched for t in ts] + list(favorites or ())
-    resolutions, search_warnings = resolve_tracks(
+    resolutions, search_errors = resolve_tracks(
         all_tracks, state, ytm, retry_unmatched=retry_unmatched
     )
-    warnings += search_warnings
+    errors += search_errors
     liked = frozenset(ytm.liked_video_ids()) if cfg.likes else frozenset()
 
     plan = plan_sync(
@@ -305,5 +310,5 @@ def run_sync(
     warnings += plan.warnings
     unmatched = sum(isinstance(r, Unmatched) for r in resolutions.values())
     if dry_run:
-        return SyncReport(plan, None, warnings, unmatched)
-    return SyncReport(plan, apply_plan(plan, ytm, state), warnings, unmatched)
+        return SyncReport(plan, None, warnings, unmatched, errors)
+    return SyncReport(plan, apply_plan(plan, ytm, state), warnings, unmatched, errors)

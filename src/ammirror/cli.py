@@ -152,17 +152,19 @@ def sync(ctx: click.Context, dry_run: bool, retry_unmatched: bool) -> None:
 
     for w in report.warnings:
         click.secho(f"warning: {w}", fg="yellow", err=True)
+    for e in report.errors:
+        click.secho(f"error: {e}", fg="red", err=True)
     for op in report.plan.ops:
         click.echo(("would " if dry_run else "") + describe(op))
     tail = f"{report.unmatched} unmatched (see `ammirror unmatched`)"
+    failures = report.result.failures if report.result else []
     if report.result is None:
         click.echo(f"dry run: {len(report.plan.ops)} ops planned, {tail}")
-        return
-    failures = report.result.failures
-    for op, err in failures:
-        click.secho(f"failed: {describe(op)}: {err}", fg="red", err=True)
-    click.echo(f"applied {report.result.applied}, {len(failures)} failed, {tail}")
-    if failures:
+    else:
+        for op, err in failures:
+            click.secho(f"failed: {describe(op)}: {err}", fg="red", err=True)
+        click.echo(f"applied {report.result.applied}, {len(failures)} failed, {tail}")
+    if report.errors or failures:
         ctx.exit(1)
 
 

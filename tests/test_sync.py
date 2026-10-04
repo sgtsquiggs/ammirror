@@ -84,11 +84,11 @@ def test_resolve_match_clears_unmatched(state: State) -> None:
     assert state.get_unmatched("1") is None
 
 
-def test_resolve_search_failure_is_a_warning(state: State) -> None:
+def test_resolve_search_failure_is_an_error(state: State) -> None:
     t = track(1)
-    res, warnings = resolve_tracks([t], state, FakeYtm(fail_on={"search_songs"}))
+    res, errors = resolve_tracks([t], state, FakeYtm(fail_on={"search_songs"}))
     assert res == {}
-    assert len(warnings) == 1
+    assert errors == ["search failed for Artist - Song 1: fake failure in search_songs"]
 
 
 def test_apply_create_records_mapping_and_adds(state: State) -> None:
@@ -152,7 +152,8 @@ def test_run_sync_removal_and_missing_names(state: State) -> None:
     report = run_sync(cfg, apple, ytm, state)
     pid = state.playlist_mappings()["p.gym"].ytm_playlist_id
     assert [i.video_id for i in ytm.playlists[pid].items] == ["v1"]
-    assert any("Nope" in w for w in report.warnings)
+    assert report.warnings == ["no Apple Music playlist named 'Nope'"]
+    assert report.errors == []
 
 
 def test_run_sync_skips_failing_playlist_without_forgetting(state: State) -> None:
@@ -163,7 +164,8 @@ def test_run_sync_skips_failing_playlist_without_forgetting(state: State) -> Non
     apple.failing_playlists = {"p.gym"}
     report = run_sync(SyncConfig(likes=False), apple, ytm, state)
     assert "p.gym" in state.playlist_mappings()
-    assert any("Gym" in w for w in report.warnings)
+    assert report.errors == ["skipped 'Gym': fake failure for p.gym"]
+    assert report.warnings == []
 
 
 def test_run_sync_ytm_playlist_read_failure_skips_playlist(state: State) -> None:
@@ -174,7 +176,16 @@ def test_run_sync_ytm_playlist_read_failure_skips_playlist(state: State) -> None
     ytm.fail_on = {"get_playlist"}
     report = run_sync(SyncConfig(likes=False), apple, ytm, state)
     assert report.plan.ops == ()
-    assert any("Gym" in w for w in report.warnings)
+    assert report.errors == ["skipped 'Gym': fake failure in get_playlist"]
+    assert report.warnings == []
+
+
+def test_run_sync_search_failure_is_an_error(state: State) -> None:
+    apple = FakeApple(playlists=[(GYM, [track(1)])])
+    ytm = FakeYtm(fail_on={"search_songs"})
+    report = run_sync(SyncConfig(likes=False), apple, ytm, state, dry_run=True)
+    assert len(report.errors) == 1 and "search failed" in report.errors[0]
+    assert report.warnings == []
 
 
 def test_run_sync_counts_unmatched(state: State) -> None:

@@ -91,8 +91,9 @@ ammirror unmatched          # list tracks that could not be matched
 ammirror pin APPLE_ID VIDEO_ID    # match a track by hand
 ```
 
-Exit codes: 0 on success, 1 if some operations failed, 2 for an
-authentication or configuration problem.
+Exit codes: 0 on success, 1 if a playlist was skipped, a search failed, or
+an operation failed (also with `--dry-run`), 2 for an authentication or
+configuration problem.
 
 ## How matching works
 

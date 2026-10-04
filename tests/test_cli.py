@@ -154,3 +154,21 @@ def test_sync_missing_ytm_auth_exits_2(paths: Paths, monkeypatch: pytest.MonkeyP
     result = CliRunner().invoke(cli, ["sync"])
     assert result.exit_code == 2
     assert "ammirror auth ytm" in result.output
+
+
+def test_sync_dry_run_with_skipped_playlist_exits_1(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    apple, _ = fakes
+    apple.failing_playlists = {"p.gym"}
+    result = CliRunner().invoke(cli, ["sync", "--dry-run"])
+    assert result.exit_code == 1
+    assert "error: skipped 'Gym'" in result.output
+    assert "dry run:" in result.output
+
+
+def test_sync_search_failure_exits_1(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    _, ytm = fakes
+    ytm.fail_on = {"search_songs"}
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 1
+    assert "error: search failed" in result.output
+    assert "applied" in result.output
