@@ -23,4 +23,11 @@ def load_developer_token(cfg: AppleConfig, *, ttl: int = 3600) -> str:
         key_pem = cfg.key_path.read_text()
     except OSError as e:
         raise ConfigError(f"cannot read MusicKit key {cfg.key_path}: {e.strerror}") from e
-    return make_developer_token(key_pem, cfg.key_id, cfg.team_id, ttl=ttl)
+    except UnicodeDecodeError as e:
+        raise ConfigError(f"cannot read MusicKit key {cfg.key_path}: not a PEM text file") from e
+    try:
+        return make_developer_token(key_pem, cfg.key_id, cfg.team_id, ttl=ttl)
+    except (jwt.PyJWTError, ValueError, TypeError) as e:
+        # cryptography raises ValueError for unparseable PEM; PyJWT InvalidKeyError for
+        # a key that isn't an EC P-256 private key.
+        raise ConfigError(f"invalid MusicKit key {cfg.key_path}: {e}") from e

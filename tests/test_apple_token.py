@@ -3,7 +3,7 @@ from pathlib import Path
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
 from ammirror.apple.token import load_developer_token, make_developer_token
 from ammirror.config import AppleConfig
@@ -48,3 +48,33 @@ def test_load_developer_token_reads_key(tmp_path: Path) -> None:
 def test_load_developer_token_missing_key(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="MusicKit key"):
         load_developer_token(AppleConfig(tmp_path / "missing.p8", "K", "T"))
+
+
+def test_load_developer_token_garbage_key(tmp_path: Path) -> None:
+    key = tmp_path / "AuthKey.p8"
+    key.write_text("this is not a PEM key\n")
+    with pytest.raises(ConfigError, match=f"invalid MusicKit key {key}"):
+        load_developer_token(AppleConfig(key, "K", "T"))
+
+
+def test_load_developer_token_wrong_key_type(tmp_path: Path) -> None:
+    rsa_pem = (
+        rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        .private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        .decode()
+    )
+    key = tmp_path / "AuthKey.p8"
+    key.write_text(rsa_pem)
+    with pytest.raises(ConfigError, match=f"invalid MusicKit key {key}"):
+        load_developer_token(AppleConfig(key, "K", "T"))
+
+
+def test_load_developer_token_binary_key(tmp_path: Path) -> None:
+    key = tmp_path / "AuthKey.p8"
+    key.write_bytes(b"\xff\xfe\x00garbage")
+    with pytest.raises(ConfigError, match="MusicKit key"):
+        load_developer_token(AppleConfig(key, "K", "T"))

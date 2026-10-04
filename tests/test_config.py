@@ -91,3 +91,17 @@ def test_auth_error_message() -> None:
     e = AuthError("ytm")
     assert e.service == "ytm"
     assert str(e) == "YouTube Music auth missing or expired: run `ammirror auth ytm`"
+
+
+def test_load_config_unreadable_is_config_error(tmp_path: Path) -> None:
+    f = tmp_path / "config.toml"
+    f.mkdir()
+    with pytest.raises(ConfigError, match="cannot read"):
+        load_config(f)
+
+
+def test_load_config_not_utf8_is_config_error(tmp_path: Path) -> None:
+    f = tmp_path / "config.toml"
+    f.write_bytes(b'[apple]\nkey_id = "\xff\xfe"\n')
+    with pytest.raises(ConfigError, match="cannot read"):
+        load_config(f)

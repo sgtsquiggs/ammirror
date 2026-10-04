@@ -73,7 +73,11 @@ def load_config(path: Path) -> Config:
     if not path.exists():
         raise ConfigError(f"config not found at {path} (see README for an example)")
     try:
-        raw = tomllib.loads(path.read_text())
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        raise ConfigError(f"cannot read config {path}: {e}") from e
+    try:
+        raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from e
 
