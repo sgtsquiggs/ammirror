@@ -63,13 +63,44 @@ def test_resolve_pin_wins(state: State) -> None:
     assert res["1"] == Matched("pinned", 1.0, "pin")
 
 
-def test_resolve_no_catalog_is_unmatched_without_search(state: State) -> None:
+def ytm_for_library(t, video_id: str) -> FakeYtm:
+    """FakeYtm that returns an exact match for one track, whatever its catalog id."""
+    return FakeYtm(
+        search_results={search_query(t): [cand(video_id, t.title, (t.artist,), duration_s=200)]}
+    )
+
+
+def test_resolve_no_catalog_is_searched_and_cached(state: State) -> None:
+    t = track(1, catalog=False)
+    ytm = ytm_for_library(t, "vlib")
+    res, errors = resolve_tracks([t], state, ytm)
+    got = res[t.key]
+    assert isinstance(got, Matched)
+    assert got.video_id == "vlib" and got.method == "search"
+    assert errors == []
+    assert state.get_match(t.library_id) == got
+    resolve_tracks([t], state, ytm)
+    assert [c[0] for c in ytm.calls] == ["search_songs"]
+
+
+def test_resolve_no_catalog_without_results_is_no_results(state: State) -> None:
     t = track(1, catalog=False)
     ytm = FakeYtm()
     res, _ = resolve_tracks([t], state, ytm)
-    assert res[t.key] == Unmatched(UnmatchedReason.NO_CATALOG)
-    assert ytm.calls == []
-    assert state.get_unmatched(t.key) == Unmatched(UnmatchedReason.NO_CATALOG)
+    assert res[t.key] == Unmatched(UnmatchedReason.NO_RESULTS)
+    assert state.get_unmatched(t.library_id) == Unmatched(UnmatchedReason.NO_RESULTS)
+    resolve_tracks([t], state, ytm)
+    assert [c[0] for c in ytm.calls] == ["search_songs"]
+
+
+def test_resolve_stored_no_catalog_row_does_not_suppress_search(state: State) -> None:
+    t = track(1, catalog=False)
+    state.put_unmatched(t, Unmatched(UnmatchedReason.NO_CATALOG))
+    ytm = FakeYtm()
+    res, _ = resolve_tracks([t], state, ytm)
+    assert [c[0] for c in ytm.calls] == ["search_songs"]
+    assert res[t.key] == Unmatched(UnmatchedReason.NO_RESULTS)
+    assert state.get_unmatched(t.library_id) == Unmatched(UnmatchedReason.NO_RESULTS)
 
 
 def test_resolve_unmatched_is_cached_unless_retry(state: State) -> None:
@@ -175,6 +206,16 @@ def test_run_sync_end_to_end_and_idempotent(state: State) -> None:
 
     again = run_sync(cfg, apple, ytm, state)
     assert again.plan.ops == ()
+
+
+def test_run_sync_likes_favorite_without_catalog_id(state: State) -> None:
+    fav = track(1, catalog=False)
+    apple = FakeApple(playlists=[(GYM, [])], favorites=[fav])
+    ytm = ytm_for_library(fav, "vlib")
+    report = run_sync(SyncConfig(), apple, ytm, state)
+    assert report.result is not None and report.result.failures == []
+    assert ytm.liked == {"vlib"}
+    assert state.owned_likes() == {"vlib": fav.library_id}
 
 
 def test_run_sync_passes_favorites_playlist_name(state: State) -> None:

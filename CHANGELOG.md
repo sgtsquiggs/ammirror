@@ -10,3 +10,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - `-v` and `-vv` global options log progress (verbose) and per-item decisions and
   request details (debug) to stderr. Error tracebacks now need `-vv`.
+
+### Fixed
+
+- Songs without an Apple Music catalog link (uploads and old iTunes-matched
+  library entries) are now searched on YouTube Music by title, artist and
+  duration instead of being skipped as unmatched.

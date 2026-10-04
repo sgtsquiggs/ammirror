@@ -222,23 +222,21 @@ def resolve_tracks(
                 log.debug("cache hit: %s → %s (score %.2f)", label, cached.video_id, cached.score)
             resolutions[t.key] = cached
             continue
-        if t.catalog_id is None:
-            result: Resolution = Unmatched(UnmatchedReason.NO_CATALOG)
-        else:
-            previous = None if retry_unmatched else state.get_unmatched(t.key)
-            if previous is not None:
-                cached_n += 1
-                log.debug("previously unmatched, skipping search: %s", label)
-                resolutions[t.key] = previous
-                continue
-            query = search_query(t)
-            log.debug("searching: %r for %s", query, label)
-            try:
-                result = choose(t, ytm.search_songs(query))
-            except ServiceError as e:
-                errors.append(f"search failed for {t.artist} - {t.title}: {e}")
-                continue
-            searched_n += 1
+        previous = None if retry_unmatched else state.get_unmatched(t.key)
+        # Rows from before no-catalog tracks were searched must not suppress a search.
+        if previous is not None and previous.reason is not UnmatchedReason.NO_CATALOG:
+            cached_n += 1
+            log.debug("previously unmatched, skipping search: %s", label)
+            resolutions[t.key] = previous
+            continue
+        query = search_query(t)
+        log.debug("searching: %r for %s", query, label)
+        try:
+            result = choose(t, ytm.search_songs(query))
+        except ServiceError as e:
+            errors.append(f"search failed for {t.artist} - {t.title}: {e}")
+            continue
+        searched_n += 1
         if isinstance(result, Matched):
             log.debug("matched: %s → %s (score %.2f)", label, result.video_id, result.score)
             state.put_match(t.key, result.video_id, result.score, result.method)
