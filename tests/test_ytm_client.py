@@ -183,3 +183,63 @@ def test_transport_errors_are_service_errors() -> None:
     client, _ = make(get_liked_songs=requests.ConnectionError("boom"))
     with pytest.raises(ServiceError):
         client.liked_video_ids()
+
+
+class FlakyYT:
+    """get_liked_songs raises the given errors in turn, then succeeds."""
+
+    def __init__(self, errors: list[Exception]) -> None:
+        self.errors = errors
+        self.calls = 0
+
+    def get_liked_songs(self, **_kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return {"tracks": [{"videoId": "v1"}]}
+
+
+def rate_limited() -> YTMusicServerError:
+    return YTMusicServerError("Server returned HTTP 429: Too Many Requests.")
+
+
+def test_429_is_retried_with_backoff() -> None:
+    yt = FlakyYT([rate_limited(), rate_limited()])
+    sleeps: list[float] = []
+    client = YtmusicapiClient(yt, sleep=sleeps.append)
+    assert client.liked_video_ids() == {"v1"}
+    assert sleeps == [1.0, 2.0]
+    assert yt.calls == 3
+
+
+def test_429_gives_up_after_four_retries() -> None:
+    yt = FlakyYT([rate_limited() for _ in range(5)])
+    sleeps: list[float] = []
+    client = YtmusicapiClient(yt, sleep=sleeps.append)
+    with pytest.raises(ServiceError, match="429"):
+        client.liked_video_ids()
+    assert sleeps == [1.0, 2.0, 4.0, 8.0]
+    assert yt.calls == 5
+
+
+def test_other_server_errors_are_not_retried() -> None:
+    yt = FlakyYT([YTMusicServerError("Server returned HTTP 500: Internal Server Error.")])
+    sleeps: list[float] = []
+    with pytest.raises(ServiceError):
+        YtmusicapiClient(yt, sleep=sleeps.append).liked_video_ids()
+    assert sleeps == []
+    assert yt.calls == 1
+
+
+@pytest.mark.parametrize(
+    "msg",
+    [
+        "Please provide authentication before using this function",
+        "AUTH required",
+        "Invalid OAuth credentials",
+    ],
+)
+def test_user_error_about_auth_is_auth_error(msg: str) -> None:
+    client, _ = make(get_liked_songs=YTMusicUserError(msg))
+    with pytest.raises(AuthError):
+        client.liked_video_ids()

@@ -4,12 +4,13 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import requests
-from ytmusicapi.exceptions import YTMusicError, YTMusicServerError
+from ytmusicapi.exceptions import YTMusicError, YTMusicServerError, YTMusicUserError
 
 from ammirror.errors import YTMUSICAPI_HINT, AuthError, ServiceError
 from ammirror.models import YtmCandidate, YtmPlaylist, YtmPlaylistItem
 
 BATCH = 50
+RATE_LIMIT_RETRIES = 4  # backoff 1, 2, 4, 8 s
 DESCRIPTION = "Mirrored from Apple Music by ammirror"
 
 
@@ -62,10 +63,27 @@ class YtmusicapiClient:
         return cls(YTMusic(str(path)))
 
     def _call(self, name: str, *args: Any, **kwargs: Any) -> Any:
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            try:
+                return self._call_once(name, *args, **kwargs)
+            except YTMusicServerError as e:
+                if attempt == RATE_LIMIT_RETRIES:  # only rate limits get here
+                    raise ServiceError(f"YouTube Music {name} failed: {e}") from e
+                self._sleep(float(2**attempt))
+        raise AssertionError("unreachable")
+
+    def _call_once(self, name: str, *args: Any, **kwargs: Any) -> Any:
+        """Call ytmusicapi once; rate-limit errors pass through for _call to retry."""
         try:
             return getattr(self._yt, name)(*args, **kwargs)
         except YTMusicServerError as e:
             if any(code in str(e) for code in ("HTTP 401", "HTTP 403")):
+                raise AuthError("ytm") from e
+            if "HTTP 429" in str(e):
+                raise
+            raise ServiceError(f"YouTube Music {name} failed: {e}") from e
+        except YTMusicUserError as e:
+            if "auth" in str(e).lower():
                 raise AuthError("ytm") from e
             raise ServiceError(f"YouTube Music {name} failed: {e}") from e
         except (YTMusicError, requests.RequestException) as e:
