@@ -117,8 +117,6 @@ def plan_sync(
                 res = resolutions.get(apple_id)
                 if not isinstance(res, Matched) or res.video_id == video_id:
                     continue
-                ops.append(Unlike(video_id))
-                continue
             ops.append(Unlike(video_id) if video_id in ytm.liked else ForgetLike(video_id))
 
     return Plan(tuple(ops), tuple(warnings))

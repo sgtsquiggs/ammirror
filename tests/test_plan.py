@@ -150,8 +150,20 @@ def test_owned_like_whose_favorite_is_now_unmatched() -> None:
 def test_owned_like_whose_favorite_is_rematched_to_different_video() -> None:
     apple = AppleSnapshot((), (T1,))
     rematched: dict[str, Resolution] = {**RES, "1": Matched("v3", 0.9, "pin")}
-    p = plan(apple, YtmSnapshot({}, frozenset()), owned={"v1": "1"}, res=rematched)
+    p = plan(
+        apple,
+        YtmSnapshot({}, frozenset({"v1"})),
+        owned={"v1": "1"},
+        res=rematched,
+    )
     assert p.ops == (Like("v3", "1"), Unlike("v1"))
+
+
+def test_owned_like_rematched_but_old_video_not_on_ytm() -> None:
+    apple = AppleSnapshot((), (T1,))
+    rematched: dict[str, Resolution] = {**RES, "1": Matched("v3", 0.9, "pin")}
+    p = plan(apple, YtmSnapshot({}, frozenset()), owned={"v1": "1"}, res=rematched)
+    assert p.ops == (Like("v3", "1"), ForgetLike("v1"))
 
 
 def test_owned_like_still_favorited_but_not_yet_liked() -> None:
