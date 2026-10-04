@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from ammirror.cli import cli
 from ammirror.config import Paths
+from ammirror.errors import YTMUSICAPI_HINT, ServiceError
 from ammirror.match import search_query
 from ammirror.models import ApplePlaylist
 from ammirror.state import State
@@ -172,3 +173,27 @@ def test_sync_search_failure_exits_1(fakes: tuple[FakeApple, FakeYtm]) -> None:
     assert result.exit_code == 1
     assert "error: search failed" in result.output
     assert "applied" in result.output
+
+
+def test_sync_suggests_upgrade_once_on_ytmusicapi_parse_errors(
+    fakes: tuple[FakeApple, FakeYtm], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, ytm = fakes
+
+    def broken(*_args: object) -> None:
+        raise ServiceError(f"YouTube Music search failed: 'contents' {YTMUSICAPI_HINT}")
+
+    monkeypatch.setattr(ytm, "search_songs", broken)
+    monkeypatch.setattr(ytm, "create_playlist", broken)
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 1
+    last = result.output.strip().splitlines()[-1]
+    assert "uv tool upgrade ammirror" in last
+    assert sum("hint:" in line for line in result.output.splitlines()) == 1
+
+
+def test_sync_without_parse_errors_has_no_upgrade_hint(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    _, ytm = fakes
+    ytm.fail_on = {"create_playlist"}
+    result = CliRunner().invoke(cli, ["sync"])
+    assert "hint:" not in result.output

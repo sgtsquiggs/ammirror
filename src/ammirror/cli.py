@@ -11,7 +11,7 @@ from ammirror.apple.auth import run_auth_flow
 from ammirror.apple.client import AppleClient, AppleLibrary
 from ammirror.apple.token import load_developer_token
 from ammirror.config import Config, Paths, load_config, write_secret
-from ammirror.errors import AmmirrorError, AuthError, ConfigError
+from ammirror.errors import YTMUSICAPI_HINT, AmmirrorError, AuthError, ConfigError
 from ammirror.state import State
 from ammirror.sync import describe, run_sync, select_playlists
 from ammirror.ytm.client import YtmClient, YtmusicapiClient
@@ -164,6 +164,13 @@ def sync(ctx: click.Context, dry_run: bool, retry_unmatched: bool) -> None:
         for op, err in failures:
             click.secho(f"failed: {describe(op)}: {err}", fg="red", err=True)
         click.echo(f"applied {report.result.applied}, {len(failures)} failed, {tail}")
+    if any(YTMUSICAPI_HINT in m for m in [*report.errors, *(err for _, err in failures)]):
+        click.secho(
+            "hint: some YouTube Music responses could not be parsed; "
+            "try `uv tool upgrade ammirror`",
+            fg="yellow",
+            err=True,
+        )
     if report.errors or failures:
         ctx.exit(1)
 

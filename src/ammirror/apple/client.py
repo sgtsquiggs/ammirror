@@ -29,11 +29,11 @@ def _parse_track(item: dict[str, Any]) -> AppleTrack | None:
     cattrs = (cat or {}).get("attributes") or {}
     title = cattrs.get("name") or attrs.get("name")
     artist = cattrs.get("artistName") or attrs.get("artistName")
-    if not title or not artist:
+    if not title or not artist or not item.get("id"):
         return None
     return AppleTrack(
         library_id=item["id"],
-        catalog_id=cat["id"] if cat else None,
+        catalog_id=(cat or {}).get("id") or None,
         title=title,
         artist=artist,
         album=cattrs.get("albumName") or attrs.get("albumName") or "",
@@ -99,7 +99,13 @@ class AppleClient:
                 continue
             if resp.is_error:
                 raise ServiceError(f"Apple Music API returned {resp.status_code} for {path}")
-            return resp.json()
+            try:
+                body = resp.json()
+            except ValueError:
+                body = None
+            if not isinstance(body, dict):
+                raise ServiceError(f"Apple Music API response for {path} is not JSON")
+            return body
         raise AssertionError("unreachable")
 
     @staticmethod
@@ -116,13 +122,15 @@ class AppleClient:
         while next_path:
             url = httpx.URL(next_path)
             body = self._get(url.path, {**params, **dict(url.params)}, missing_ok=missing_ok)
-            yield from body.get("data", [])
+            # Skip malformed entries rather than failing the whole read on one bad item.
+            yield from (item for item in body.get("data") or [] if isinstance(item, dict))
             next_path = body.get("next")
 
     def library_playlists(self) -> list[ApplePlaylist]:
         return [
             ApplePlaylist(item["id"], (item.get("attributes") or {}).get("name", ""))
             for item in self._paginate("/v1/me/library/playlists", {"limit": str(PAGE_LIMIT)})
+            if item.get("id")
         ]
 
     def playlist_tracks(self, playlist_id: str) -> list[AppleTrack]:

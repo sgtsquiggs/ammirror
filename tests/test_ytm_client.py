@@ -77,8 +77,20 @@ def test_get_playlist_parse_error_on_existing_playlist_raises() -> None:
     client, _ = make(
         get_playlist=KeyError("contents"), get_library_playlists=[{"playlistId": "PL1"}]
     )
-    with pytest.raises(ServiceError, match="could not read"):
+    with pytest.raises(ServiceError, match="could not read") as info:
         client.get_playlist("PL1")
+    assert "uv tool upgrade ammirror" in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "exc", [KeyError("x"), IndexError("y"), TypeError("z"), ValueError("w")], ids=repr
+)
+def test_parse_errors_are_service_errors_with_upgrade_hint(exc: Exception) -> None:
+    client, _ = make(get_liked_songs=exc)
+    with pytest.raises(ServiceError) as info:
+        client.liked_video_ids()
+    assert str(info.value).startswith("YouTube Music get_liked_songs failed:")
+    assert str(info.value).endswith("(ytmusicapi may need upgrading: `uv tool upgrade ammirror`)")
 
 
 def test_server_401_is_auth_error() -> None:

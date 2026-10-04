@@ -6,7 +6,7 @@ from typing import Any, Protocol
 import requests
 from ytmusicapi.exceptions import YTMusicError, YTMusicServerError
 
-from ammirror.errors import AuthError, ServiceError
+from ammirror.errors import YTMUSICAPI_HINT, AuthError, ServiceError
 from ammirror.models import YtmCandidate, YtmPlaylist, YtmPlaylistItem
 
 BATCH = 50
@@ -70,6 +70,11 @@ class YtmusicapiClient:
             raise ServiceError(f"YouTube Music {name} failed: {e}") from e
         except (YTMusicError, requests.RequestException) as e:
             raise ServiceError(f"YouTube Music {name} failed: {e}") from e
+        except (KeyError, IndexError, TypeError, ValueError) as e:
+            # ytmusicapi scrapes YouTube Music's internal API; when the response shape
+            # changes it fails with bare lookup/type errors until it is updated.
+            detail = f"{type(e).__name__} {e}"
+            raise ServiceError(f"YouTube Music {name} failed: {detail} {YTMUSICAPI_HINT}") from e
 
     def _write(self, name: str, *args: Any, **kwargs: Any) -> Any:
         result = self._call(name, *args, **kwargs)
@@ -83,13 +88,15 @@ class YtmusicapiClient:
     def get_playlist(self, playlist_id: str) -> YtmPlaylist | None:
         try:
             data = self._call("get_playlist", playlist_id, limit=None)
-        except (KeyError, ServiceError) as e:
-            # ytmusicapi raises a bare KeyError for missing playlists. Make sure the playlist
-            # is really gone before reporting it missing, or a parser break would make sync
-            # create a duplicate playlist every run.
+        except ServiceError as e:
+            # ytmusicapi raises a bare KeyError (a ServiceError from _call) for missing
+            # playlists. Make sure the playlist is really gone before reporting it missing,
+            # or a parser break would make sync create a duplicate playlist every run.
             owned = self._call("get_library_playlists", limit=None) or []
             if any(p.get("playlistId") == playlist_id for p in owned):
-                raise ServiceError(f"could not read YouTube Music playlist {playlist_id}") from e
+                raise ServiceError(
+                    f"could not read YouTube Music playlist {playlist_id}: {e}"
+                ) from e
             return None
         items = tuple(
             YtmPlaylistItem(t["videoId"], t["setVideoId"])

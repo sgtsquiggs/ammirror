@@ -152,3 +152,35 @@ def test_library_playlists_404_is_an_error() -> None:
 def test_favorite_songs_404_is_an_error() -> None:
     with pytest.raises(ServiceError, match="404"):
         client(lambda _r: httpx.Response(404)).favorite_songs()
+
+
+def test_non_json_response_is_service_error() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>maintenance</html>")
+
+    with pytest.raises(ServiceError, match="not JSON"):
+        client(handler).library_playlists()
+
+
+def test_non_object_json_response_is_service_error() -> None:
+    with pytest.raises(ServiceError, match="not JSON"):
+        client(lambda _r: httpx.Response(200, json=["x"])).library_playlists()
+
+
+def test_items_without_id_are_skipped() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/v1/me/library/playlists":
+            return httpx.Response(
+                200,
+                json={"data": [{"attributes": {"name": "X"}}, {"id": "p.1"}, "junk"]},
+            )
+        no_id = lib_song(1)
+        del no_id["id"]
+        bad_catalog = lib_song(2)
+        del bad_catalog["relationships"]["catalog"]["data"][0]["id"]
+        return httpx.Response(200, json={"data": [no_id, bad_catalog, lib_song(3), None]})
+
+    c = client(handler)
+    assert c.library_playlists() == [ApplePlaylist("p.1", "")]
+    tracks = c.playlist_tracks("p.1")
+    assert [(t.library_id, t.catalog_id) for t in tracks] == [("i.2", None), ("i.3", "300")]
