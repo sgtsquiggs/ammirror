@@ -93,7 +93,17 @@ def run_auth_flow(
         def log_message(self, format: str, *args: object) -> None:
             pass
 
+        def _host_ok(self) -> bool:
+            # Blocks DNS-rebinding: a page on another origin that resolves to 127.0.0.1
+            # still sends its own name in Host.
+            if self.headers.get("Host") == f"127.0.0.1:{server.server_port}":
+                return True
+            self.send_error(403)
+            return False
+
         def do_GET(self) -> None:
+            if not self._host_ok():
+                return
             if self.path != "/":
                 self.send_error(404)
                 return
@@ -106,6 +116,8 @@ def run_auth_flow(
             self.wfile.write(page)
 
         def do_POST(self) -> None:
+            if not self._host_ok():
+                return
             if self.path != "/token":
                 self.send_error(404)
                 return

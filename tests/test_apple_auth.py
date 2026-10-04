@@ -55,3 +55,29 @@ def test_render_page_escapes_values() -> None:
     page = render_page('a"b', "n0nce")
     assert 'const DEVELOPER_TOKEN = "a\\"b";' in page
     assert 'const NONCE = "n0nce";' in page
+
+
+def test_foreign_host_header_is_rejected() -> None:
+    seen: dict[str, int] = {}
+
+    def open_browser(url: str) -> None:
+        def run() -> None:
+            page = httpx.get(url, trust_env=False)
+            nonce = re.search(r'const NONCE = "([^"]+)"', page.text)
+            assert nonce
+            evil = {"Host": "evil.example"}
+            seen["get"] = httpx.get(url, headers=evil, trust_env=False).status_code
+            body = json.dumps({"nonce": nonce.group(1), "token": "stolen"})
+            seen["post"] = httpx.post(
+                url + "token", content=body, headers=evil, trust_env=False
+            ).status_code
+            port = url.split(":")[2].rstrip("/")
+            seen["localhost"] = httpx.get(
+                url, headers={"Host": f"localhost:{port}"}, trust_env=False
+            ).status_code
+
+        threading.Thread(target=run, daemon=True).start()
+
+    with pytest.raises(AuthError, match="timed out"):
+        run_auth_flow("dev", open_browser=open_browser, timeout=1)
+    assert seen == {"get": 403, "post": 403, "localhost": 403}
