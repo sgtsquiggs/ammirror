@@ -136,7 +136,11 @@ def playlists(ctx: click.Context) -> None:
 
 
 @cli.command()
-@click.option("--dry-run", is_flag=True, help="Print the plan without changing YouTube Music.")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print the plan; never changes YouTube Music, but caches match results locally.",
+)
 @click.option(
     "--retry-unmatched", is_flag=True, help="Search again for previously unmatched tracks."
 )

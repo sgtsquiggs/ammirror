@@ -235,3 +235,9 @@ def test_sync_auth_error_mid_apply_exits_2(fakes: tuple[FakeApple, FakeYtm]) -> 
     assert result.exit_code == 2
     assert "ammirror auth ytm" in result.output
     assert "applied" not in result.output
+
+
+def test_sync_dry_run_help_mentions_local_cache() -> None:
+    out = CliRunner().invoke(cli, ["sync", "--help"]).output
+    assert "never changes YouTube Music" in " ".join(out.split())
+    assert "caches match results locally" in " ".join(out.split())

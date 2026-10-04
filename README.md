@@ -84,12 +84,15 @@ Credentials are stored under `~/.config/ammirror/` with mode 0600.
 
 ```sh
 ammirror playlists          # list Apple Music playlists; shows which are selected and mirrored
-ammirror sync --dry-run     # print what would change without touching YouTube Music
+ammirror sync --dry-run     # print what would change; never touches YouTube Music
 ammirror sync               # mirror playlists and likes
 ammirror sync --retry-unmatched   # also search again for tracks that failed to match
 ammirror unmatched          # list tracks that could not be matched
 ammirror pin APPLE_ID VIDEO_ID    # match a track by hand
 ```
+
+`--dry-run` never changes YouTube Music, but it still searches for tracks and
+caches the match results locally, so the next real sync does not search again.
 
 Exit codes: 0 on success, 1 if a playlist was skipped, a search failed, or
 an operation failed (also with `--dry-run`), 2 for an authentication or
