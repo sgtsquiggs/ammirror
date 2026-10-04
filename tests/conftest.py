@@ -13,4 +13,8 @@ def _reset_ammirror_logger() -> Iterator[None]:
         logger.removeHandler(h)
     logger.setLevel(logging.NOTSET)
     logger.propagate = True
-    logging.getLogger("httpx").setLevel(logging.NOTSET)
+    httpx_logger = logging.getLogger("httpx")
+    for h in list(httpx_logger.handlers):
+        httpx_logger.removeHandler(h)
+    httpx_logger.setLevel(logging.NOTSET)
+    httpx_logger.propagate = True

@@ -104,7 +104,12 @@ def plan_sync(
         if current is None:
             if mapping:
                 warnings.append(f"mirror of '{playlist.name}' is gone on YouTube Music; recreating")
-            log.debug("plan '%s': desired %d, no mirror yet, create", playlist.name, len(desired))
+            log.debug(
+                "plan '%s': desired %d, %s",
+                playlist.name,
+                len(desired),
+                "mirror gone, recreate" if mapping else "no mirror yet, create",
+            )
             ops.append(CreatePlaylist(playlist.id, playlist.name, title, desired))
             continue
         if current.title != title:

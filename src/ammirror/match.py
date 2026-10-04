@@ -113,7 +113,7 @@ def choose(track: AppleTrack, candidates: Sequence[YtmCandidate]) -> Resolution:
                 s,
                 c.title,
                 ", ".join(c.artists),
-                c.duration_s,
+                "?" if c.duration_s is None else c.duration_s,
             )
     best_score, best = ranked[0]
     if best_score < THRESHOLD:

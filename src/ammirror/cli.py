@@ -30,6 +30,7 @@ class CliContext:
         return load_config(self.paths.config_file)
 
 
+_HANDLER_TAG = "_ammirror_handler"
 _INFO_FORMAT = "· %(message)s"
 _DEBUG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
@@ -40,8 +41,11 @@ def configure_logging(verbosity: int) -> None:
     Safe to call repeatedly: it replaces the handler it installed before.
     """
     logger = logging.getLogger("ammirror")
-    for old in list(logger.handlers):
-        logger.removeHandler(old)
+    httpx_logger = logging.getLogger("httpx")
+    for lg in (logger, httpx_logger):
+        for old in list(lg.handlers):
+            if getattr(old, _HANDLER_TAG, False):
+                lg.removeHandler(old)
     level = logging.DEBUG if verbosity >= 2 else logging.INFO if verbosity == 1 else logging.WARNING
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(
@@ -49,12 +53,19 @@ def configure_logging(verbosity: int) -> None:
         if level == logging.DEBUG
         else logging.Formatter(_INFO_FORMAT)
     )
+    setattr(handler, _HANDLER_TAG, True)
     logger.addHandler(handler)
     logger.setLevel(level)
     logger.propagate = False
     # httpx logs only method, URL and status. httpcore and urllib3 can dump headers, so
-    # they stay at WARNING.
-    logging.getLogger("httpx").setLevel(logging.INFO if level == logging.DEBUG else logging.WARNING)
+    # they stay at WARNING. httpx is outside the `ammirror` tree, so it needs the handler too.
+    if level == logging.DEBUG:
+        httpx_logger.addHandler(handler)
+        httpx_logger.setLevel(logging.INFO)
+        httpx_logger.propagate = False
+    else:
+        httpx_logger.setLevel(logging.WARNING)
+        httpx_logger.propagate = True
 
 
 class _Group(click.Group):

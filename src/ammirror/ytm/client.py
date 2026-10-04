@@ -33,6 +33,7 @@ class YtmClient(Protocol):
 _REQUEST_LINE = re.compile(
     r"^(?:(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT|TRACE) \S+.*|.* HTTP/\d(?:\.\d)?)$"
 )
+_PSEUDO_NAME = re.compile(r"^:[A-Za-z-]+")
 _BODY_HEADERS = frozenset({"content-encoding", "content-length"})
 
 
@@ -50,7 +51,8 @@ def sanitize_ytm_headers_report(raw: str) -> tuple[str, list[str]]:
     for line in raw.splitlines(keepends=True):
         text = line.rstrip("\r\n")
         if text.startswith(":"):
-            dropped.append(":" + text[1:].partition(":")[0])
+            m = _PSEUDO_NAME.match(text)
+            dropped.append(m.group() if m else "<pseudo-header>")
             continue
         if _REQUEST_LINE.match(text):
             dropped.append("<request line>")
