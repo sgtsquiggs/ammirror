@@ -10,6 +10,7 @@ dependencies = [
     { name = "click" },
     { name = "httpx" },
     { name = "pyjwt", extra = ["crypto"] },
+    { name = "requests" },
     { name = "ytmusicapi" },
 ]
 
@@ -25,6 +26,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.5.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
+    { name = "requests", specifier = ">=2.34.2" },
     { name = "ytmusicapi", specifier = ">=1.12" },
 ]
 
