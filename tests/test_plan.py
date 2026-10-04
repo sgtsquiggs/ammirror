@@ -1,0 +1,153 @@
+from ammirror.models import (
+    AddItems,
+    ApplePlaylist,
+    CreatePlaylist,
+    ForgetLike,
+    ForgetPlaylist,
+    Like,
+    Matched,
+    Plan,
+    PlaylistMapping,
+    RemoveItems,
+    RenamePlaylist,
+    Resolution,
+    Unlike,
+    Unmatched,
+    UnmatchedReason,
+    YtmPlaylist,
+    YtmPlaylistItem,
+)
+from ammirror.sync import AppleSnapshot, YtmSnapshot, describe, plan_sync, select_playlists
+from tests.factories import track
+
+GYM = ApplePlaylist("p.gym", "Gym")
+T1, T2, T3 = track(1), track(2), track(3)
+RES = {
+    "1": Matched("v1", 0.9, "search"),
+    "2": Matched("v2", 0.9, "search"),
+    "3": Matched("v3", 0.9, "search"),
+}
+
+
+def item(v: str) -> YtmPlaylistItem:
+    return YtmPlaylistItem(v, f"set-{v}")
+
+
+def plan(
+    apple: AppleSnapshot,
+    ytm: YtmSnapshot,
+    mappings: dict[str, PlaylistMapping] | None = None,
+    owned: dict[str, str] | None = None,
+    res: dict[str, Resolution] | None = None,
+    prefix: str = "",
+) -> Plan:
+    managed = {p.id for p, _ in apple.playlists}
+    return plan_sync(
+        apple, res or RES, ytm, mappings or {}, owned or {}, managed_ids=managed, prefix=prefix
+    )
+
+
+def test_select_playlists() -> None:
+    a, b, c = ApplePlaylist("1", "A"), ApplePlaylist("2", "B"), ApplePlaylist("3", "A")
+    assert select_playlists([a, b, c], ["*"]) == ([a, b, c], [])
+    assert select_playlists([a, b, c], ["A", "Z"]) == ([a, c], ["Z"])
+
+
+def test_new_playlist_is_created_with_matched_tracks_in_order() -> None:
+    unmatched = {**RES, "2": Unmatched(UnmatchedReason.LOW_SCORE)}
+    apple = AppleSnapshot(((GYM, (T3, T1, T2, T1)),), None)
+    p = plan(apple, YtmSnapshot({}, frozenset()), res=unmatched, prefix="AM: ")
+    assert p.ops == (CreatePlaylist("p.gym", "Gym", "AM: Gym", ("v3", "v1")),)
+
+
+def test_existing_playlist_gets_adds_and_removes() -> None:
+    apple = AppleSnapshot(((GYM, (T1, T2)),), None)
+    ytm = YtmSnapshot({"PL": YtmPlaylist("PL", "Gym", (item("v1"), item("v9")))}, frozenset())
+    p = plan(apple, ytm, {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")})
+    assert p.ops == (
+        AddItems("PL", "Gym", ("v2",)),
+        RemoveItems("PL", "Gym", (item("v9"),)),
+    )
+
+
+def test_in_sync_playlist_has_no_ops() -> None:
+    apple = AppleSnapshot(((GYM, (T1,)),), None)
+    ytm = YtmSnapshot({"PL": YtmPlaylist("PL", "Gym", (item("v1"),))}, frozenset())
+    assert plan(apple, ytm, {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")}).ops == ()
+
+
+def test_rename_when_title_differs() -> None:
+    apple = AppleSnapshot(((ApplePlaylist("p.gym", "Lifting"), (T1,)),), None)
+    ytm = YtmSnapshot({"PL": YtmPlaylist("PL", "Gym", (item("v1"),))}, frozenset())
+    p = plan(apple, ytm, {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")})
+    assert p.ops == (RenamePlaylist("p.gym", "PL", "Lifting", "Lifting"),)
+
+
+def test_missing_mirror_is_recreated_with_warning() -> None:
+    apple = AppleSnapshot(((GYM, (T1,)),), None)
+    ytm = YtmSnapshot({"PL": None}, frozenset())
+    p = plan(apple, ytm, {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")})
+    assert p.ops == (CreatePlaylist("p.gym", "Gym", "Gym", ("v1",)),)
+    assert any("recreat" in w for w in p.warnings)
+
+
+def test_unmanaged_mapping_is_forgotten() -> None:
+    apple = AppleSnapshot((), None)
+    p = plan(apple, YtmSnapshot({}, frozenset()), {"p.old": PlaylistMapping("p.old", "PLo", "Old")})
+    assert p.ops == (ForgetPlaylist("p.old", "Old"),)
+
+
+def test_mapping_of_skipped_but_managed_playlist_is_kept() -> None:
+    apple = AppleSnapshot((), None)
+    p = plan_sync(
+        apple,
+        RES,
+        YtmSnapshot({}, frozenset()),
+        {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")},
+        {},
+        managed_ids={"p.gym"},
+    )
+    assert p.ops == ()
+
+
+def test_likes_added_only_when_not_already_liked() -> None:
+    apple = AppleSnapshot((), (T1, T2))
+    p = plan(apple, YtmSnapshot({}, frozenset({"v2"})))
+    assert p.ops == (Like("v1", "1"),)
+
+
+def test_owned_like_removed_when_unfavorited() -> None:
+    apple = AppleSnapshot((), (T1,))
+    p = plan(apple, YtmSnapshot({}, frozenset({"v1", "v2", "v7"})), owned={"v1": "1", "v2": "2"})
+    assert p.ops == (Unlike("v2"),)  # v7 is the user's own like: untouched
+
+
+def test_owned_like_already_gone_is_forgotten() -> None:
+    apple = AppleSnapshot((), ())
+    p = plan(apple, YtmSnapshot({}, frozenset()), owned={"v1": "1"})
+    assert p.ops == (ForgetLike("v1"),)
+
+
+def test_likes_disabled_touches_nothing() -> None:
+    apple = AppleSnapshot((), None)
+    p = plan(apple, YtmSnapshot({}, frozenset({"v1"})), owned={"v1": "1"})
+    assert p.ops == ()
+
+
+def test_describe() -> None:
+    cp = CreatePlaylist("p", "Gym", "Gym", ("a", "b"))
+    assert describe(cp) == "create playlist 'Gym' with 2 tracks"
+    ai = AddItems("PL", "Gym", ("a",))
+    assert describe(ai) == "add 1 track to 'Gym'"
+    ri = RemoveItems("PL", "Gym", (item("a"), item("b")))
+    assert describe(ri) == "remove 2 tracks from 'Gym'"
+    rp = RenamePlaylist("p", "PL", "New", "New")
+    assert describe(rp) == "rename playlist PL to 'New'"
+    fp = ForgetPlaylist("p", "Old")
+    assert describe(fp) == "stop mirroring 'Old' (YouTube Music copy kept)"
+    lk = Like("v1", "1")
+    assert describe(lk) == "like v1"
+    uk = Unlike("v1")
+    assert describe(uk) == "unlike v1"
+    fl = ForgetLike("v1")
+    assert describe(fl) == "forget like v1 (already removed on YouTube Music)"
