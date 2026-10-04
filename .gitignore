@@ -9,6 +9,7 @@ build/
 .coverage
 # secrets backstop — real ones live in ~/.config/ammirror
 *.p8
-*token*
+apple-user-token
+*.token
 ytm-*.json
 state.db
