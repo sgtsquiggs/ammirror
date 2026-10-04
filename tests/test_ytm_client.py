@@ -1,6 +1,7 @@
 from typing import Any
 
 import pytest
+import requests
 from ytmusicapi.exceptions import YTMusicServerError, YTMusicUserError
 
 from ammirror.errors import AuthError, ServiceError
@@ -145,3 +146,28 @@ def test_rename() -> None:
     client, yt = make(edit_playlist="STATUS_SUCCEEDED")
     client.rename_playlist("PL1", "New")
     assert yt.calls[0] == ("edit_playlist", ("PL1",), {"title": "New"})
+
+
+def test_remove_items_failure_status() -> None:
+    client, _ = make(remove_playlist_items={"status": "STATUS_FAILED"})
+    with pytest.raises(ServiceError):
+        client.remove_items("PL1", [YtmPlaylistItem("v1", "s1")])
+
+
+def test_remove_items_chunks_at_50() -> None:
+    client, yt = make(remove_playlist_items="STATUS_SUCCEEDED")
+    items = [YtmPlaylistItem(f"v{i}", f"s{i}") for i in range(120)]
+    client.remove_items("PL1", items)
+    assert [len(c[1][1]) for c in yt.calls] == [50, 50, 20]
+
+
+def test_rename_failure_status() -> None:
+    client, _ = make(edit_playlist={"status": "STATUS_FAILED"})
+    with pytest.raises(ServiceError):
+        client.rename_playlist("PL1", "New")
+
+
+def test_transport_errors_are_service_errors() -> None:
+    client, _ = make(get_liked_songs=requests.ConnectionError("boom"))
+    with pytest.raises(ServiceError):
+        client.liked_video_ids()

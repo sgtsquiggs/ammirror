@@ -3,6 +3,7 @@ from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
+import requests
 from ytmusicapi.exceptions import YTMusicError, YTMusicServerError
 
 from ammirror.errors import AuthError, ServiceError
@@ -27,6 +28,12 @@ class YtmClient(Protocol):
 def _chunks[T](items: Sequence[T], size: int) -> Iterator[list[T]]:
     for i in range(0, len(items), size):
         yield list(items[i : i + size])
+
+
+def _expect_succeeded(name: str, result: Any) -> None:
+    status = result.get("status") if isinstance(result, dict) else result
+    if status != "STATUS_SUCCEEDED":
+        raise ServiceError(f"YouTube Music {name} failed: {result!r}")
 
 
 def _candidate(r: dict[str, Any]) -> YtmCandidate | None:
@@ -61,7 +68,7 @@ class YtmusicapiClient:
             if any(code in str(e) for code in ("HTTP 401", "HTTP 403")):
                 raise AuthError("ytm") from e
             raise ServiceError(f"YouTube Music {name} failed: {e}") from e
-        except YTMusicError as e:
+        except (YTMusicError, requests.RequestException) as e:
             raise ServiceError(f"YouTube Music {name} failed: {e}") from e
 
     def _write(self, name: str, *args: Any, **kwargs: Any) -> Any:
@@ -98,19 +105,20 @@ class YtmusicapiClient:
         return result
 
     def rename_playlist(self, playlist_id: str, title: str) -> None:
-        self._write("edit_playlist", playlist_id, title=title)
+        result = self._write("edit_playlist", playlist_id, title=title)
+        _expect_succeeded("edit_playlist", result)
 
     def add_items(self, playlist_id: str, video_ids: Sequence[str]) -> None:
         unique = list(dict.fromkeys(video_ids))
         for batch in _chunks(unique, BATCH):
             result = self._write("add_playlist_items", playlist_id, videoIds=batch)
-            if not isinstance(result, dict) or result.get("status") != "STATUS_SUCCEEDED":
-                raise ServiceError(f"YouTube Music add_playlist_items failed: {result!r}")
+            _expect_succeeded("add_playlist_items", result)
 
     def remove_items(self, playlist_id: str, items: Sequence[YtmPlaylistItem]) -> None:
         for batch in _chunks(items, BATCH):
             videos = [{"videoId": i.video_id, "setVideoId": i.set_video_id} for i in batch]
-            self._write("remove_playlist_items", playlist_id, videos)
+            result = self._write("remove_playlist_items", playlist_id, videos)
+            _expect_succeeded("remove_playlist_items", result)
 
     def liked_video_ids(self) -> set[str]:
         data = self._call("get_liked_songs", limit=None) or {}
