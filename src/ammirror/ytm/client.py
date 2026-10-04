@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -9,6 +10,8 @@ from ytmusicapi.exceptions import YTMusicError, YTMusicServerError, YTMusicUserE
 
 from ammirror.errors import YTMUSICAPI_HINT, AuthError, ServiceError
 from ammirror.models import YtmCandidate, YtmPlaylist, YtmPlaylistItem
+
+log = logging.getLogger(__name__)
 
 BATCH = 50
 RATE_LIMIT_RETRIES = 4  # backoff 1, 2, 4, 8 s
@@ -33,22 +36,48 @@ _REQUEST_LINE = re.compile(
 _BODY_HEADERS = frozenset({"content-encoding", "content-length"})
 
 
-def sanitize_ytm_headers(raw: str) -> str:
+def sanitize_ytm_headers_report(raw: str) -> tuple[str, list[str]]:
     """Drop pasted lines that describe the browser's own request, keep the rest verbatim.
 
     Firefox's "Copy Request Headers" includes the HTTP request line, HTTP/2-3
     pseudo-headers, and content-encoding/content-length of the browser's (gzipped)
     body; ytmusicapi sends plain JSON, so these make YouTube answer HTTP 400.
+
+    Also returns the names of the dropped lines (never their values).
     """
     kept: list[str] = []
+    dropped: list[str] = []
     for line in raw.splitlines(keepends=True):
         text = line.rstrip("\r\n")
-        if text.startswith(":") or _REQUEST_LINE.match(text):
+        if text.startswith(":"):
+            dropped.append(":" + text[1:].partition(":")[0])
             continue
-        if text.partition(":")[0].strip().lower() in _BODY_HEADERS:
+        if _REQUEST_LINE.match(text):
+            dropped.append("<request line>")
+            continue
+        name = text.partition(":")[0].strip().lower()
+        if name in _BODY_HEADERS:
+            dropped.append(name)
             continue
         kept.append(line)
-    return "".join(kept)
+    return "".join(kept), dropped
+
+
+def sanitize_ytm_headers(raw: str) -> str:
+    """Like `sanitize_ytm_headers_report`, returning only the cleaned headers."""
+    return sanitize_ytm_headers_report(raw)[0]
+
+
+def _describe_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    """Render call arguments for the debug log; long lists are shown as counts."""
+
+    def one(v: Any) -> str:
+        if isinstance(v, list | tuple) and len(v) > 10:
+            return f"<{len(v)} items>"
+        return repr(v)
+
+    parts = [one(a) for a in args] + [f"{k}={one(v)}" for k, v in kwargs.items()]
+    return ", ".join(parts)
 
 
 def _chunks[T](items: Sequence[T], size: int) -> Iterator[list[T]]:
@@ -89,12 +118,15 @@ class YtmusicapiClient:
 
     def _call(self, name: str, *args: Any, **kwargs: Any) -> Any:
         for attempt in range(RATE_LIMIT_RETRIES + 1):
+            log.debug("ytm call %s(%s)", name, _describe_args(args, kwargs))
             try:
                 return self._call_once(name, *args, **kwargs)
             except YTMusicServerError as e:
                 if attempt == RATE_LIMIT_RETRIES:  # only rate limits get here
                     raise ServiceError(f"YouTube Music {name} failed: {e}") from e
-                self._sleep(float(2**attempt))
+                delay = float(2**attempt)
+                log.debug("ytm %s rate limited (HTTP 429); retrying in %gs", name, delay)
+                self._sleep(delay)
         raise AssertionError("unreachable")
 
     def _call_once(self, name: str, *args: Any, **kwargs: Any) -> Any:
@@ -136,7 +168,13 @@ class YtmusicapiClient:
             # playlists. Make sure the playlist is really gone before reporting it missing,
             # or a parser break would make sync create a duplicate playlist every run.
             owned = self._call("get_library_playlists", limit=None) or []
-            if any(p.get("playlistId") == playlist_id for p in owned):
+            in_library = any(p.get("playlistId") == playlist_id for p in owned)
+            log.debug(
+                "playlist %s unreadable; library check: %s",
+                playlist_id,
+                "still in library" if in_library else "gone",
+            )
+            if in_library:
                 raise ServiceError(
                     f"could not read YouTube Music playlist {playlist_id}: {e}"
                 ) from e

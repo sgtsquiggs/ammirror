@@ -104,6 +104,19 @@ Exit codes: 0 on success, 1 if a playlist was skipped, a search failed, or
 an operation failed (also with `--dry-run`), 2 for an authentication or
 configuration problem.
 
+## Logging
+
+Logs go to stderr, so normal command output on stdout is unchanged.
+
+- `ammirror -v sync` (verbose) narrates progress: playlists found and fetched,
+  a track-resolution summary, the planned operations, and each one as it is applied.
+- `ammirror -vv sync` (debug) adds per-track match decisions and candidate scores,
+  per-playlist plan counts, Apple Music and YouTube Music request details, and
+  tracebacks for errors.
+
+Tokens, headers, cookies, and key material are never logged; only header names
+and request paths are.
+
 ## How matching works
 
 Each Apple Music track is looked up on YouTube Music by title and artist, and a

@@ -1,3 +1,4 @@
+import logging
 import re
 import unicodedata
 from collections.abc import Sequence
@@ -11,6 +12,8 @@ from ammirror.models import (
     UnmatchedReason,
     YtmCandidate,
 )
+
+log = logging.getLogger(__name__)
 
 THRESHOLD = 0.75
 MARGIN = 0.05
@@ -100,6 +103,18 @@ def choose(track: AppleTrack, candidates: Sequence[YtmCandidate]) -> Resolution:
     if not candidates:
         return Unmatched(UnmatchedReason.NO_RESULTS)
     ranked = sorted(((score(track, c), c) for c in candidates), key=lambda p: p[0], reverse=True)
+    if log.isEnabledFor(logging.DEBUG):
+        for rank, (s, c) in enumerate(ranked[:3], 1):
+            log.debug(
+                "candidate %d for %s - %s: %.2f %r by %s (%ss)",
+                rank,
+                track.artist,
+                track.title,
+                s,
+                c.title,
+                ", ".join(c.artists),
+                c.duration_s,
+            )
     best_score, best = ranked[0]
     if best_score < THRESHOLD:
         return Unmatched(UnmatchedReason.LOW_SCORE, best, best_score)

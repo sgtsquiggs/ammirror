@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
@@ -27,6 +28,8 @@ from ammirror.models import (
 )
 from ammirror.state import State
 from ammirror.ytm.client import YtmClient
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,7 @@ def plan_sync(
         if current is None:
             if mapping:
                 warnings.append(f"mirror of '{playlist.name}' is gone on YouTube Music; recreating")
+            log.debug("plan '%s': desired %d, no mirror yet, create", playlist.name, len(desired))
             ops.append(CreatePlaylist(playlist.id, playlist.name, title, desired))
             continue
         if current.title != title:
@@ -109,6 +113,14 @@ def plan_sync(
         wanted = set(desired)
         adds = tuple(v for v in desired if v not in present)
         removes = tuple(i for i in current.items if i.video_id not in wanted)
+        log.debug(
+            "plan '%s': desired %d, present %d, add %d, remove %d",
+            playlist.name,
+            len(desired),
+            len(present),
+            len(adds),
+            len(removes),
+        )
         if adds:
             ops.append(AddItems(current.id, title, adds))
         if removes and not tracks:
@@ -124,9 +136,12 @@ def plan_sync(
             res = resolutions.get(t.key)
             if isinstance(res, Matched):
                 favorites.setdefault(res.video_id, t.key)
+        likes_before = len(ops)
         for video_id, apple_id in favorites.items():
             if video_id not in ytm.liked:
                 ops.append(Like(video_id, apple_id))
+        to_like = len(ops) - likes_before
+        kept_unresolved = 0
         favorite_keys = {t.key for t in apple.favorites}
         if not apple.favorites and owned_likes:
             # Same guard as for playlists: never unlike everything on an empty read.
@@ -138,8 +153,16 @@ def plan_sync(
             if apple_id in favorite_keys:
                 res = resolutions.get(apple_id)
                 if not isinstance(res, Matched) or res.video_id == video_id:
+                    kept_unresolved += 1
                     continue
             ops.append(Unlike(video_id) if video_id in ytm.liked else ForgetLike(video_id))
+        log.debug(
+            "plan likes: %d to like, %d to unlike, %d to forget, %d kept (still favorited)",
+            to_like,
+            sum(isinstance(o, Unlike) for o in ops),
+            sum(isinstance(o, ForgetLike) for o in ops),
+            kept_unresolved,
+        )
 
     return Plan(tuple(ops), tuple(warnings))
 
@@ -179,11 +202,19 @@ def resolve_tracks(
     """
     resolutions: dict[str, Resolution] = {}
     errors: list[str] = []
+    cached_n = pinned_n = searched_n = 0
     for t in tracks:
         if t.key in resolutions:
             continue
+        label = f"{t.artist} - {t.title}"
         cached = state.get_match(t.key)
         if cached:
+            if cached.method == "pin":
+                pinned_n += 1
+                log.debug("pin: %s → %s", label, cached.video_id)
+            else:
+                cached_n += 1
+                log.debug("cache hit: %s → %s (score %.2f)", label, cached.video_id, cached.score)
             resolutions[t.key] = cached
             continue
         if t.catalog_id is None:
@@ -191,19 +222,44 @@ def resolve_tracks(
         else:
             previous = None if retry_unmatched else state.get_unmatched(t.key)
             if previous is not None:
+                cached_n += 1
+                log.debug("previously unmatched, skipping search: %s", label)
                 resolutions[t.key] = previous
                 continue
+            query = search_query(t)
+            log.debug("searching: %r for %s", query, label)
             try:
-                result = choose(t, ytm.search_songs(search_query(t)))
+                result = choose(t, ytm.search_songs(query))
             except ServiceError as e:
                 errors.append(f"search failed for {t.artist} - {t.title}: {e}")
                 continue
+            searched_n += 1
         if isinstance(result, Matched):
+            log.debug("matched: %s → %s (score %.2f)", label, result.video_id, result.score)
             state.put_match(t.key, result.video_id, result.score, result.method)
             state.clear_unmatched(t.key)
         else:
+            best = result.candidate
+            log.debug(
+                "unmatched: %s (%s)%s",
+                label,
+                result.reason,
+                f"; best: {best.title!r} score {result.candidate_score:.2f}"
+                if best and result.candidate_score is not None
+                else "",
+            )
             state.put_unmatched(t, result)
         resolutions[t.key] = result
+    n_unmatched = sum(isinstance(r, Unmatched) for r in resolutions.values())
+    log.info(
+        "resolved %d tracks: %d cached, %d pinned, %d searched → %d matched, %d unmatched",
+        len(resolutions),
+        cached_n,
+        pinned_n,
+        searched_n,
+        len(resolutions) - n_unmatched,
+        n_unmatched,
+    )
     return resolutions, errors
 
 
@@ -243,9 +299,12 @@ def apply_plan(plan: Plan, ytm: YtmClient, state: State) -> ApplyResult:
     """Apply ops in order. Auth errors abort; other service errors are collected."""
     result = ApplyResult()
     for op in plan.ops:
+        log.info("→ %s", describe(op))
         try:
             _apply_one(op, ytm, state)
         except ServiceError as e:
+            # INFO, not WARNING: the CLI already prints every failure to the user.
+            log.info("  failed: %s", e)
             result.failures.append((op, str(e)))
             continue
         result.applied += 1
@@ -272,7 +331,14 @@ def run_sync(
 ) -> SyncReport:
     warnings: list[str] = []
     errors: list[str] = []
-    selected, missing = select_playlists(apple.library_playlists(), cfg.playlists)
+    available = apple.library_playlists()
+    selected, missing = select_playlists(available, cfg.playlists)
+    log.info(
+        "found %d Apple Music playlists; %d selected: %s",
+        len(available),
+        len(selected),
+        ", ".join(f"'{p.name}'" for p in selected) or "none",
+    )
     warnings += [f"no Apple Music playlist named '{name}'" for name in missing]
 
     mappings = state.playlist_mappings()
@@ -284,6 +350,7 @@ def run_sync(
         except ServiceError as e:
             errors.append(f"skipped '{p.name}': {e}")
             continue
+        log.info("Fetching '%s'… %d tracks", p.name, len(tracks))
         mapping = mappings.get(p.id)
         if mapping:
             try:
@@ -298,6 +365,7 @@ def run_sync(
     if likes:
         try:
             favorites = tuple(apple.favorite_songs(cfg.favorites_playlist))
+            log.info("%d favorites from '%s'", len(favorites), cfg.favorites_playlist)
         except ServiceError as e:
             errors.append(str(e))
             likes = False  # a favorites failure must not abort the playlists
@@ -318,6 +386,12 @@ def run_sync(
     )
     warnings += plan.warnings
     unmatched = sum(isinstance(r, Unmatched) for r in resolutions.values())
+    log.info("planned %d ops", len(plan.ops))
     if dry_run:
+        log.info("dry run: not applying; %d unmatched", unmatched)
         return SyncReport(plan, None, warnings, unmatched, errors)
-    return SyncReport(plan, apply_plan(plan, ytm, state), warnings, unmatched, errors)
+    result = apply_plan(plan, ytm, state)
+    log.info(
+        "done: applied %d, %d failed, %d unmatched", result.applied, len(result.failures), unmatched
+    )
+    return SyncReport(plan, result, warnings, unmatched, errors)

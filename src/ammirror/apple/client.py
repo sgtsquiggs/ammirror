@@ -1,3 +1,4 @@
+import logging
 import time
 from collections.abc import Callable, Iterator
 from typing import Any, Protocol
@@ -8,6 +9,8 @@ from ammirror.apple.token import load_developer_token
 from ammirror.config import Config, Paths
 from ammirror.errors import AuthError, ServiceError
 from ammirror.models import ApplePlaylist, AppleTrack, normalize_playlist_name
+
+log = logging.getLogger(__name__)
 
 API = "https://api.music.apple.com"
 PAGE_LIMIT = 100
@@ -74,19 +77,25 @@ class AppleClient:
     ) -> dict[str, Any]:
         for attempt in range(self._max_retries + 1):
             last = attempt == self._max_retries
+            log.debug("GET %s %s", path, params)
             try:
                 resp = self._http.get(path, params=params)
             except httpx.TransportError as e:
                 if last:
                     raise ServiceError(f"Apple Music request failed: {e}") from e
-                self._sleep(float(2**attempt))
+                delay = float(2**attempt)
+                log.debug("GET %s failed (%s); retrying in %gs", path, type(e).__name__, delay)
+                self._sleep(delay)
                 continue
+            log.debug("GET %s -> %d", path, resp.status_code)
             if resp.status_code in (401, 403):
                 raise AuthError("apple")
             if resp.status_code == 404 and missing_ok:
                 return {"data": []}
             if resp.status_code in _RETRY_STATUSES and not last:
-                self._sleep(self._retry_delay(resp, attempt))
+                delay = self._retry_delay(resp, attempt)
+                log.debug("GET %s returned %d; retrying in %gs", path, resp.status_code, delay)
+                self._sleep(delay)
                 continue
             if resp.is_error:
                 raise ServiceError(f"Apple Music API returned {resp.status_code} for {path}")
@@ -110,11 +119,15 @@ class AppleClient:
         self, path: str, params: dict[str, str], *, missing_ok: bool = False
     ) -> Iterator[dict[str, Any]]:
         next_path: str | None = path
+        page = 0
         while next_path:
+            page += 1
             url = httpx.URL(next_path)
             body = self._get(url.path, {**params, **dict(url.params)}, missing_ok=missing_ok)
             # Skip malformed entries rather than failing the whole read on one bad item.
-            yield from (item for item in body.get("data") or [] if isinstance(item, dict))
+            items = [item for item in body.get("data") or [] if isinstance(item, dict)]
+            log.debug("%s page %d: %d items", url.path, page, len(items))
+            yield from items
             next_path = body.get("next")
 
     def library_playlists(self) -> list[ApplePlaylist]:

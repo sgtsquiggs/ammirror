@@ -1,4 +1,5 @@
 import json
+import logging
 import secrets
 import threading
 import webbrowser
@@ -8,6 +9,8 @@ from importlib.metadata import version
 from string import Template
 
 from ammirror.errors import AuthError
+
+log = logging.getLogger(__name__)
 
 _PAGE = Template("""<!doctype html>
 <html lang="en">
@@ -141,7 +144,9 @@ def run_auth_flow(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        open_browser(f"http://127.0.0.1:{server.server_port}/")
+        url = f"http://127.0.0.1:{server.server_port}/"
+        log.info("Waiting for browser sign-in at %s", url)
+        open_browser(url)
         if not done.wait(timeout):
             raise AuthError("apple", "sign-in timed out")
     finally:

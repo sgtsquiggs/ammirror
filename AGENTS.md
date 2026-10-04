@@ -36,6 +36,8 @@ for what the tool does and how it is installed.
 - Layering: only `apple/client.py` imports httpx among source modules (tests may import it); only `ytm/client.py` and the
   `auth ytm` command import ytmusicapi. `match.py` and `sync.plan_sync` are
   pure; keep I/O out of them.
+- Log with `logging.getLogger(__name__)`: INFO is progress, DEBUG is per-item
+  detail. Never log secrets (tokens, header values, key material).
 - Playlist mappings are never dropped. A playlist removed from `sync.playlists`
   keeps its mapping and its YouTube Music copy; selecting it again reuses that
   copy rather than creating a duplicate.

@@ -1,3 +1,4 @@
+import logging
 import os
 import sqlite3
 from dataclasses import dataclass
@@ -13,6 +14,8 @@ from ammirror.models import (
     UnmatchedReason,
     YtmCandidate,
 )
+
+log = logging.getLogger(__name__)
 
 _SCHEMA_V1 = """
 CREATE TABLE matches (
@@ -80,6 +83,7 @@ class State:
     def _migrate(self) -> None:
         (version,) = self._db.execute("PRAGMA user_version").fetchone()
         if version == 0:
+            log.debug("state: applying schema migration to version 1")
             self._db.executescript("BEGIN;" + _SCHEMA_V1 + "PRAGMA user_version = 1; COMMIT;")
 
     def close(self) -> None:

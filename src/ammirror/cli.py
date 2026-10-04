@@ -1,3 +1,4 @@
+import logging
 import sys
 import traceback
 from dataclasses import dataclass
@@ -15,16 +16,45 @@ from ammirror.config import Config, Paths, load_config, write_secret
 from ammirror.errors import YTMUSICAPI_HINT, AmmirrorError, AuthError, ConfigError
 from ammirror.state import State
 from ammirror.sync import describe, run_sync, select_playlists
-from ammirror.ytm.client import YtmClient, YtmusicapiClient, sanitize_ytm_headers
+from ammirror.ytm.client import YtmClient, YtmusicapiClient, sanitize_ytm_headers_report
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
 class CliContext:
     paths: Paths
-    verbose: bool
+    verbosity: int
 
     def config(self) -> Config:
         return load_config(self.paths.config_file)
+
+
+_INFO_FORMAT = "· %(message)s"
+_DEBUG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+
+def configure_logging(verbosity: int) -> None:
+    """Send `ammirror` logs to stderr: WARNING by default, INFO for -v, DEBUG for -vv.
+
+    Safe to call repeatedly: it replaces the handler it installed before.
+    """
+    logger = logging.getLogger("ammirror")
+    for old in list(logger.handlers):
+        logger.removeHandler(old)
+    level = logging.DEBUG if verbosity >= 2 else logging.INFO if verbosity == 1 else logging.WARNING
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(
+        logging.Formatter(_DEBUG_FORMAT, datefmt="%H:%M:%S")
+        if level == logging.DEBUG
+        else logging.Formatter(_INFO_FORMAT)
+    )
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False
+    # httpx logs only method, URL and status. httpcore and urllib3 can dump headers, so
+    # they stay at WARNING.
+    logging.getLogger("httpx").setLevel(logging.INFO if level == logging.DEBUG else logging.WARNING)
 
 
 class _Group(click.Group):
@@ -35,7 +65,7 @@ class _Group(click.Group):
             return super().invoke(ctx)
         except AmmirrorError as e:
             obj = ctx.obj
-            if isinstance(obj, CliContext) and obj.verbose:
+            if isinstance(obj, CliContext) and obj.verbosity >= 2:
                 traceback.print_exc()
             click.echo(f"error: {e}", err=True)
             ctx.exit(2 if isinstance(e, AuthError | ConfigError) else 1)
@@ -49,10 +79,17 @@ def get_ctx(ctx: click.Context) -> CliContext:
 
 @click.group(cls=_Group)
 @click.version_option(version("ammirror"), prog_name="ammirror")
-@click.option("--verbose", "-v", is_flag=True, help="Show tracebacks for errors.")
+@click.option(
+    "--verbose",
+    "-v",
+    count=True,
+    help="-v narrates progress (verbose); -vv adds per-item decisions, request details "
+    "and error tracebacks (debug). Logs go to stderr; secrets are never logged.",
+)
 @click.pass_context
-def cli(ctx: click.Context, verbose: bool) -> None:
+def cli(ctx: click.Context, verbose: int) -> None:
     """Mirror Apple Music playlists and Favorite Songs into YouTube Music."""
+    configure_logging(verbose)
     ctx.obj = CliContext(Paths.from_env(), verbose)
 
 
@@ -92,14 +129,22 @@ def auth_ytm(ctx: click.Context) -> None:
     headers = sys.stdin.read()
     if not headers.strip():
         raise click.UsageError("no headers pasted")
+    cleaned, dropped = sanitize_ytm_headers_report(headers)
     try:
         # Without a filepath, setup only parses the headers and returns the JSON to save,
         # so the credentials are written once, through write_secret, with mode 0600.
-        credentials = ytmusicapi.setup(headers_raw=sanitize_ytm_headers(headers))
+        credentials = ytmusicapi.setup(headers_raw=cleaned)
     except YTMusicError as e:
         raise ConfigError(f"could not parse pasted headers: {e}") from e
     target = obj.paths.ytm_auth_file
     write_secret(target, credentials)
+    kept = sum(1 for line in cleaned.splitlines() if line.strip())
+    log.info(
+        "Saved credentials (%d headers kept, %d dropped: %s)",
+        kept,
+        len(dropped),
+        ", ".join(dropped) or "none",
+    )
     click.echo(f"Saved YouTube Music credentials to {target}")
 
 
