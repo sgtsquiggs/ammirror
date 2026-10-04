@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from ammirror.errors import ServiceError
+from ammirror.errors import AuthError, ServiceError
 from ammirror.models import ApplePlaylist, AppleTrack, YtmCandidate, YtmPlaylist, YtmPlaylistItem
 
 
@@ -11,6 +11,7 @@ class FakeYtm:
     playlists: dict[str, YtmPlaylist] = field(default_factory=dict)
     liked: set[str] = field(default_factory=set)
     fail_on: set[str] = field(default_factory=set)
+    auth_fail_on: set[str] = field(default_factory=set)
     calls: list[tuple] = field(default_factory=list)
     _next_id: int = 0
 
@@ -18,6 +19,8 @@ class FakeYtm:
         self.calls.append((name, *args))
         if name in self.fail_on:
             raise ServiceError(f"fake failure in {name}")
+        if name in self.auth_fail_on:
+            raise AuthError("ytm")
 
     def search_songs(self, query: str) -> list[YtmCandidate]:
         self._record("search_songs", query)

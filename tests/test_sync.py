@@ -3,17 +3,22 @@ from pathlib import Path
 import pytest
 
 from ammirror.config import SyncConfig
+from ammirror.errors import AuthError
 from ammirror.match import search_query
 from ammirror.models import (
     AddItems,
     ApplePlaylist,
     CreatePlaylist,
+    ForgetLike,
     Like,
     Matched,
     Plan,
+    RenamePlaylist,
+    Unlike,
     Unmatched,
     UnmatchedReason,
     YtmPlaylist,
+    YtmPlaylistItem,
 )
 from ammirror.state import State
 from ammirror.sync import apply_plan, resolve_tracks, run_sync
@@ -114,6 +119,46 @@ def test_apply_failure_continues(state: State) -> None:
     assert result.applied == 1
     assert len(result.failures) == 1
     assert ytm.liked == {"v2"}
+
+
+def test_apply_rename_updates_title_and_mapping(state: State) -> None:
+    ytm = FakeYtm()
+    ytm.playlists["PL"] = YtmPlaylist("PL", "Gym", ())
+    state.put_playlist("p.gym", "PL", "Gym")
+    result = apply_plan(
+        Plan((RenamePlaylist("p.gym", "PL", "Lifting", "AM: Lifting"),)), ytm, state
+    )
+    assert result.applied == 1 and result.failures == []
+    assert ytm.playlists["PL"].title == "AM: Lifting"
+    assert state.playlist_mappings()["p.gym"].apple_name == "Lifting"
+
+
+def test_apply_unlike_drops_ownership(state: State) -> None:
+    ytm = FakeYtm(liked={"v1", "v2"})
+    state.add_owned_like("v1", "1")
+    result = apply_plan(Plan((Unlike("v1"),)), ytm, state)
+    assert result.applied == 1
+    assert ytm.liked == {"v2"}
+    assert state.owned_likes() == {}
+
+
+def test_apply_forget_like_touches_only_state(state: State) -> None:
+    ytm = FakeYtm()
+    state.add_owned_like("v1", "1")
+    result = apply_plan(Plan((ForgetLike("v1"),)), ytm, state)
+    assert result.applied == 1
+    assert ytm.calls == []
+    assert state.owned_likes() == {}
+
+
+def test_apply_auth_error_aborts_instead_of_collecting(state: State) -> None:
+    ytm = FakeYtm(auth_fail_on={"add_items"})
+    ytm.playlists["PL"] = YtmPlaylist("PL", "Gym", (YtmPlaylistItem("v9", "set-v9"),))
+    plan = Plan((AddItems("PL", "Gym", ("v1",)), Like("v2", "2")))
+    with pytest.raises(AuthError):
+        apply_plan(plan, ytm, state)
+    assert ytm.liked == set()
+    assert state.owned_likes() == {}
 
 
 def test_run_sync_end_to_end_and_idempotent(state: State) -> None:

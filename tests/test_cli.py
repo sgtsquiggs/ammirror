@@ -197,3 +197,33 @@ def test_sync_without_parse_errors_has_no_upgrade_hint(fakes: tuple[FakeApple, F
     ytm.fail_on = {"create_playlist"}
     result = CliRunner().invoke(cli, ["sync"])
     assert "hint:" not in result.output
+
+
+def test_sync_dry_run_only_reads_youtube_music(
+    paths: Paths, fakes: tuple[FakeApple, FakeYtm]
+) -> None:
+    apple, ytm = fakes
+    write_config(paths, '[sync]\nplaylists = ["Gym"]\n')  # likes on
+    apple.favorites = [track(1)]
+    ytm.liked = {"vOLD"}
+    state = State(paths.state_db)
+    try:
+        state.add_owned_like("vOLD", "99")
+    finally:
+        state.close()
+    result = CliRunner().invoke(cli, ["sync", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "would like v1" in result.output
+    assert "would unlike vOLD" in result.output
+    assert {c[0] for c in ytm.calls} <= {"search_songs", "get_playlist", "liked_video_ids"}
+    assert ytm.liked == {"vOLD"}
+    assert ytm.playlists == {}
+
+
+def test_sync_auth_error_mid_apply_exits_2(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    _, ytm = fakes
+    ytm.auth_fail_on = {"create_playlist"}
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 2
+    assert "ammirror auth ytm" in result.output
+    assert "applied" not in result.output
