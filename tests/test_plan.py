@@ -3,7 +3,6 @@ from ammirror.models import (
     ApplePlaylist,
     CreatePlaylist,
     ForgetLike,
-    ForgetPlaylist,
     Like,
     Matched,
     Plan,
@@ -41,14 +40,12 @@ def plan(
     res: dict[str, Resolution] | None = None,
     prefix: str = "",
 ) -> Plan:
-    managed = {p.id for p, _ in apple.playlists}
     return plan_sync(
         apple,
         RES if res is None else res,
         ytm,
         mappings or {},
         owned or {},
-        managed_ids=managed,
         prefix=prefix,
     )
 
@@ -57,6 +54,14 @@ def test_select_playlists() -> None:
     a, b, c = ApplePlaylist("1", "A"), ApplePlaylist("2", "B"), ApplePlaylist("3", "A")
     assert select_playlists([a, b, c], ["*"]) == ([a, b, c], [])
     assert select_playlists([a, b, c], ["A", "Z"]) == ([a, c], ["Z"])
+
+
+def test_select_playlists_dedupes_preserving_order() -> None:
+    a, b = ApplePlaylist("1", "A"), ApplePlaylist("2", "B")
+    assert select_playlists([a, b], ["A", "A"]) == ([a], [])
+    assert select_playlists([a, b], ["B", "A", "B"]) == ([b, a], [])
+    assert select_playlists([a, b], ["*", "A"]) == ([a, b], [])
+    assert select_playlists([a, b, a], ["*"]) == ([a, b], [])
 
 
 def test_new_playlist_is_created_with_matched_tracks_in_order() -> None:
@@ -97,22 +102,9 @@ def test_missing_mirror_is_recreated_with_warning() -> None:
     assert any("recreat" in w for w in p.warnings)
 
 
-def test_unmanaged_mapping_is_forgotten() -> None:
+def test_mapping_of_playlist_not_in_snapshot_is_left_alone() -> None:
     apple = AppleSnapshot((), None)
     p = plan(apple, YtmSnapshot({}, frozenset()), {"p.old": PlaylistMapping("p.old", "PLo", "Old")})
-    assert p.ops == (ForgetPlaylist("p.old", "Old"),)
-
-
-def test_mapping_of_skipped_but_managed_playlist_is_kept() -> None:
-    apple = AppleSnapshot((), None)
-    p = plan_sync(
-        apple,
-        RES,
-        YtmSnapshot({}, frozenset()),
-        {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")},
-        {},
-        managed_ids={"p.gym"},
-    )
     assert p.ops == ()
 
 
@@ -188,8 +180,6 @@ def test_describe() -> None:
     assert describe(ri) == "remove 2 tracks from 'Gym'"
     rp = RenamePlaylist("p", "PL", "New", "New")
     assert describe(rp) == "rename playlist PL to 'New'"
-    fp = ForgetPlaylist("p", "Old")
-    assert describe(fp) == "stop mirroring 'Old' (YouTube Music copy kept)"
     lk = Like("v1", "1")
     assert describe(lk) == "like v1"
     uk = Unlike("v1")

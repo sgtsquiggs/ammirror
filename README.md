@@ -114,7 +114,8 @@ pinned match is used on the next sync.
   Songs you liked on YouTube Music directly are left alone.
 - Track order within a playlist is not mirrored.
 - Removing a playlist from `config.toml` stops syncing it but leaves the copy on
-  YouTube Music in place.
+  YouTube Music in place. ammirror remembers the copy, so adding the playlist
+  back later resumes syncing into it instead of creating a new one.
 
 ## Development
 

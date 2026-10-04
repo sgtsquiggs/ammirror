@@ -73,8 +73,6 @@ def test_playlist_mappings(state: State) -> None:
         "p.1": PlaylistMapping("p.1", "PLx", "Gym 2"),
         "p.2": PlaylistMapping("p.2", "PLy", "Chill"),
     }
-    state.drop_playlist("p.1")
-    assert set(state.playlist_mappings()) == {"p.2"}
 
 
 def test_owned_likes(state: State) -> None:

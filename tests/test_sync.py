@@ -181,3 +181,26 @@ def test_run_sync_counts_unmatched(state: State) -> None:
     t1 = track(1)
     report = run_sync(SyncConfig(likes=False), FakeApple(playlists=[(GYM, [t1])]), FakeYtm(), state)
     assert report.unmatched == 1
+
+
+def test_run_sync_unselected_playlist_keeps_mapping_and_reuses_mirror(state: State) -> None:
+    t1 = track(1)
+    ytm = ytm_for(t1)
+    other = ApplePlaylist("p.other", "Other")
+    apple = FakeApple(playlists=[(GYM, [t1]), (other, [])])
+    run_sync(SyncConfig(playlists=("Gym",), likes=False), apple, ytm, state)
+    pid = state.playlist_mappings()["p.gym"].ytm_playlist_id
+
+    unselected = run_sync(SyncConfig(playlists=("Other",), likes=False), apple, ytm, state)
+    assert all(
+        not isinstance(op, CreatePlaylist) or op.apple_playlist_id != "p.gym"
+        for op in unselected.plan.ops
+    )
+    assert state.playlist_mappings()["p.gym"].ytm_playlist_id == pid
+
+    again = run_sync(SyncConfig(playlists=("Gym",), likes=False), apple, ytm, state)
+    assert again.plan.ops == ()
+    assert [c for c in ytm.calls if c[0] == "create_playlist"] == [
+        ("create_playlist", "Gym"),
+        ("create_playlist", "Other"),
+    ]

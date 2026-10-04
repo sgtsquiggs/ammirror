@@ -78,7 +78,9 @@ class AppleClient:
     def close(self) -> None:
         self._http.close()
 
-    def _get(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+    def _get(
+        self, path: str, params: dict[str, str], *, missing_ok: bool = False
+    ) -> dict[str, Any]:
         for attempt in range(self._max_retries + 1):
             last = attempt == self._max_retries
             try:
@@ -90,7 +92,7 @@ class AppleClient:
                 continue
             if resp.status_code in (401, 403):
                 raise AuthError("apple")
-            if resp.status_code == 404:
+            if resp.status_code == 404 and missing_ok:
                 return {"data": []}
             if resp.status_code in _RETRY_STATUSES and not last:
                 self._sleep(self._retry_delay(resp, attempt))
@@ -107,11 +109,13 @@ class AppleClient:
         except (KeyError, ValueError):
             return float(2**attempt)
 
-    def _paginate(self, path: str, params: dict[str, str]) -> Iterator[dict[str, Any]]:
+    def _paginate(
+        self, path: str, params: dict[str, str], *, missing_ok: bool = False
+    ) -> Iterator[dict[str, Any]]:
         next_path: str | None = path
         while next_path:
             url = httpx.URL(next_path)
-            body = self._get(url.path, {**params, **dict(url.params)})
+            body = self._get(url.path, {**params, **dict(url.params)}, missing_ok=missing_ok)
             yield from body.get("data", [])
             next_path = body.get("next")
 
@@ -125,6 +129,7 @@ class AppleClient:
         items = self._paginate(
             f"/v1/me/library/playlists/{playlist_id}/tracks",
             {"include": "catalog", "limit": str(PAGE_LIMIT)},
+            missing_ok=True,  # Apple answers 404 for the tracks of an empty playlist
         )
         return [t for item in items if (t := _parse_track(item))]
 

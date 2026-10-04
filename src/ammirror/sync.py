@@ -1,5 +1,4 @@
 from collections.abc import Iterable, Mapping, Sequence
-from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 
 from ammirror.apple.client import AppleLibrary
@@ -12,7 +11,6 @@ from ammirror.models import (
     AppleTrack,
     CreatePlaylist,
     ForgetLike,
-    ForgetPlaylist,
     Like,
     Matched,
     Op,
@@ -45,18 +43,24 @@ class YtmSnapshot:
 def select_playlists(
     available: Sequence[ApplePlaylist], patterns: Sequence[str]
 ) -> tuple[list[ApplePlaylist], list[str]]:
-    """Return (selected playlists, configured names that matched nothing)."""
-    if "*" in patterns:
-        return list(available), []
-    selected: list[ApplePlaylist] = []
+    """Return (selected playlists, configured names that matched nothing).
+
+    Each playlist is selected at most once, in first-seen order.
+    """
+    hits: list[ApplePlaylist] = []
     missing: list[str] = []
-    for name in patterns:
-        hits = [p for p in available if p.name == name]
-        if hits:
-            selected.extend(hits)
-        else:
-            missing.append(name)
-    return selected, missing
+    if "*" in patterns:
+        hits = list(available)
+    else:
+        for name in patterns:
+            named = [p for p in available if p.name == name]
+            if not named:
+                missing.append(name)
+            hits.extend(named)
+    selected: dict[str, ApplePlaylist] = {}
+    for p in hits:
+        selected.setdefault(p.id, p)
+    return list(selected.values()), missing
 
 
 def _video_ids(
@@ -77,9 +81,13 @@ def plan_sync(
     mappings: Mapping[str, PlaylistMapping],
     owned_likes: Mapping[str, str],
     *,
-    managed_ids: AbstractSet[str],
     prefix: str = "",
 ) -> Plan:
+    """Plan the ops that bring YouTube Music in line with the Apple snapshot.
+
+    Mappings for playlists not in the snapshot (unselected, or skipped this run) are
+    left alone, so a playlist selected again later reuses its existing mirror.
+    """
     ops: list[Op] = []
     warnings: list[str] = []
 
@@ -103,10 +111,6 @@ def plan_sync(
             ops.append(AddItems(current.id, title, adds))
         if removes:
             ops.append(RemoveItems(current.id, title, removes))
-
-    for apple_id, mapping in mappings.items():
-        if apple_id not in managed_ids:
-            ops.append(ForgetPlaylist(apple_id, mapping.apple_name))
 
     if apple.favorites is not None:
         favorites: dict[str, str] = {}
@@ -144,8 +148,6 @@ def describe(op: Op) -> str:
             return f"add {_tracks(len(ids))} to '{title}'"
         case RemoveItems(title=title, items=items):
             return f"remove {_tracks(len(items))} from '{title}'"
-        case ForgetPlaylist(apple_name=name):
-            return f"stop mirroring '{name}' (YouTube Music copy kept)"
         case Like(video_id=vid):
             return f"like {vid}"
         case Unlike(video_id=vid):
@@ -214,8 +216,6 @@ def _apply_one(op: Op, ytm: YtmClient, state: State) -> None:
             ytm.add_items(pid, ids)
         case RemoveItems(ytm_playlist_id=pid, items=items):
             ytm.remove_items(pid, items)
-        case ForgetPlaylist(apple_playlist_id=aid):
-            state.drop_playlist(aid)
         case Like(video_id=vid, apple_id=aid):
             ytm.like(vid)
             state.add_owned_like(vid, aid)
@@ -292,7 +292,6 @@ def run_sync(
         YtmSnapshot(ytm_playlists, liked),
         mappings,
         state.owned_likes(),
-        managed_ids={p.id for p in selected},
         prefix=cfg.mirror_prefix,
     )
     warnings += plan.warnings

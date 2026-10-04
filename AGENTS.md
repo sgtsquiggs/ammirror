@@ -36,6 +36,9 @@ for what the tool does and how it is installed.
 - Layering: only `apple/client.py` imports httpx among source modules (tests may import it); only `ytm/client.py` and the
   `auth ytm` command import ytmusicapi. `match.py` and `sync.plan_sync` are
   pure; keep I/O out of them.
+- Playlist mappings are never dropped. A playlist removed from `sync.playlists`
+  keeps its mapping and its YouTube Music copy; selecting it again reuses that
+  copy rather than creating a duplicate.
 - Tests never touch the network. Fixtures are synthetic, never real library
   data.
 - Secrets live in `~/.config/ammirror/` (0600) and never in the repo.

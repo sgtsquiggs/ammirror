@@ -109,12 +109,6 @@ class RemoveItems:
 
 
 @dataclass(frozen=True)
-class ForgetPlaylist:
-    apple_playlist_id: str
-    apple_name: str
-
-
-@dataclass(frozen=True)
 class Like:
     video_id: str
     apple_id: str
@@ -130,16 +124,7 @@ class ForgetLike:
     video_id: str
 
 
-Op = (
-    CreatePlaylist
-    | RenamePlaylist
-    | AddItems
-    | RemoveItems
-    | ForgetPlaylist
-    | Like
-    | Unlike
-    | ForgetLike
-)
+Op = CreatePlaylist | RenamePlaylist | AddItems | RemoveItems | Like | Unlike | ForgetLike
 
 
 @dataclass(frozen=True)

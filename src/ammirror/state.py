@@ -171,9 +171,6 @@ class State:
             (apple_playlist_id, ytm_playlist_id, apple_name, _now()),
         )
 
-    def drop_playlist(self, apple_playlist_id: str) -> None:
-        self._db.execute("DELETE FROM playlists WHERE apple_playlist_id = ?", (apple_playlist_id,))
-
     # likes
 
     def owned_likes(self) -> dict[str, str]:

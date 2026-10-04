@@ -142,3 +142,13 @@ def test_gives_up_after_retries() -> None:
     with pytest.raises(ServiceError, match="503"):
         client(lambda _r: httpx.Response(503), sleeps).library_playlists()
     assert sleeps == [1.0, 2.0, 4.0, 8.0]
+
+
+def test_library_playlists_404_is_an_error() -> None:
+    with pytest.raises(ServiceError, match="404"):
+        client(lambda _r: httpx.Response(404)).library_playlists()
+
+
+def test_favorite_songs_404_is_an_error() -> None:
+    with pytest.raises(ServiceError, match="404"):
+        client(lambda _r: httpx.Response(404)).favorite_songs()
