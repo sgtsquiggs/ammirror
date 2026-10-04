@@ -56,7 +56,10 @@ team_id = "YYYYYYYYYY"
 # Apple Music playlist names to mirror, or ["*"] for all. Default: all.
 # Names match regardless of case, spacing, and curly vs straight quotes.
 playlists = ["*"]
-# Mirror Favorite Songs as likes on YouTube Music. Default: true.
+# Favorite Songs as likes on YouTube Music. Default: true.
+#   true       mirror: like new favorites, and un-like songs you un-favorite
+#   "add-only" like new favorites, but never un-like anything
+#   false      leave likes alone
 likes = true
 # Name of the library playlist Apple generates for your favorites. Apple
 # localizes it, so change this if yours is not called "Favorite Songs".
@@ -135,6 +138,10 @@ pinned match is used on the next sync.
   Music by hand are removed on the next sync.
 - Likes work the same way: ammirror only un-likes songs it liked itself.
   Songs you liked on YouTube Music directly are left alone.
+- With `likes = "add-only"`, ammirror still likes new favorites but never
+  un-likes: songs you un-favorite on Apple Music stay liked on YouTube Music.
+  It keeps remembering which likes it added, so switching back to `likes = true`
+  un-likes the ones that are no longer favorites on the next sync.
 - Track order within a playlist is not mirrored.
 - Removing a playlist from `config.toml` stops syncing it but leaves the copy on
   YouTube Music in place. ammirror remembers the copy, so adding the playlist

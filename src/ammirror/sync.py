@@ -3,7 +3,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from ammirror.apple.client import AppleLibrary
-from ammirror.config import SyncConfig
+from ammirror.config import LikesMode, SyncConfig
 from ammirror.errors import ServiceError
 from ammirror.match import choose, search_query
 from ammirror.models import (
@@ -87,8 +87,12 @@ def plan_sync(
     owned_likes: Mapping[str, str],
     *,
     prefix: str = "",
+    remove_likes: bool = True,
 ) -> Plan:
     """Plan the ops that bring YouTube Music in line with the Apple snapshot.
+
+    With remove_likes False (add-only likes) no Unlike is planned; owned likes of
+    unfavorited songs stay liked and owned.
 
     Mappings for playlists not in the snapshot (unselected, or skipped this run) are
     left alone, so a playlist selected again later reuses its existing mirror.
@@ -147,6 +151,7 @@ def plan_sync(
                 ops.append(Like(video_id, apple_id))
         to_like = len(ops) - likes_before
         kept_unresolved = 0
+        skipped_unlikes = 0
         favorite_keys = {t.key for t in apple.favorites}
         if not apple.favorites and owned_likes:
             # Same guard as for playlists: never unlike everything on an empty read.
@@ -160,13 +165,19 @@ def plan_sync(
                 if not isinstance(res, Matched) or res.video_id == video_id:
                     kept_unresolved += 1
                     continue
-            ops.append(Unlike(video_id) if video_id in ytm.liked else ForgetLike(video_id))
+            if video_id not in ytm.liked:
+                ops.append(ForgetLike(video_id))
+            elif remove_likes:
+                ops.append(Unlike(video_id))
+            else:
+                skipped_unlikes += 1
         log.debug(
-            "plan likes: %d to like, %d to unlike, %d to forget, %d kept (still favorited)",
+            "plan likes: %d to like, %d to unlike, %d to forget, %d kept (still favorited)%s",
             to_like,
             sum(isinstance(o, Unlike) for o in ops),
             sum(isinstance(o, ForgetLike) for o in ops),
             kept_unresolved,
+            "" if remove_likes else f", {skipped_unlikes} unlike skipped (add-only)",
         )
 
     return Plan(tuple(ops), tuple(warnings))
@@ -364,20 +375,21 @@ def run_sync(
         fetched.append((p, tracks))
 
     likes = cfg.likes
+    log.info("likes: %s", likes.value)
     favorites: tuple[AppleTrack, ...] | None = None
-    if likes:
+    if likes is not LikesMode.OFF:
         try:
             favorites = tuple(apple.favorite_songs(cfg.favorites_playlist))
             log.info("%d favorites from '%s'", len(favorites), cfg.favorites_playlist)
         except ServiceError as e:
             errors.append(str(e))
-            likes = False  # a favorites failure must not abort the playlists
+            likes = LikesMode.OFF  # a favorites failure must not abort the playlists
     all_tracks = [t for _, ts in fetched for t in ts] + list(favorites or ())
     resolutions, search_errors = resolve_tracks(
         all_tracks, state, ytm, retry_unmatched=retry_unmatched
     )
     errors += search_errors
-    liked = frozenset(ytm.liked_video_ids()) if likes else frozenset()
+    liked = frozenset(ytm.liked_video_ids()) if likes is not LikesMode.OFF else frozenset()
 
     plan = plan_sync(
         AppleSnapshot(tuple(fetched), favorites),
@@ -386,6 +398,7 @@ def run_sync(
         mappings,
         state.owned_likes(),
         prefix=cfg.mirror_prefix,
+        remove_likes=likes is not LikesMode.ADD_ONLY,
     )
     warnings += plan.warnings
     unmatched = sum(isinstance(r, Unmatched) for r in resolutions.values())

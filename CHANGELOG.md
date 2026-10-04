@@ -8,6 +8,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- `sync.likes = "add-only"` likes new favorites but never un-likes songs you
+  un-favorite. `true` keeps mirroring and `false` leaves likes alone.
 - `-v` and `-vv` global options log progress (verbose) and per-item decisions and
   request details (debug) to stderr. Error tracebacks now need `-vv`.
 

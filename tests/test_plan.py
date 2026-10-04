@@ -39,6 +39,7 @@ def plan(
     owned: dict[str, str] | None = None,
     res: dict[str, Resolution] | None = None,
     prefix: str = "",
+    remove_likes: bool = True,
 ) -> Plan:
     return plan_sync(
         apple,
@@ -47,6 +48,7 @@ def plan(
         mappings or {},
         owned or {},
         prefix=prefix,
+        remove_likes=remove_likes,
     )
 
 
@@ -128,6 +130,25 @@ def test_owned_like_removed_when_unfavorited() -> None:
     apple = AppleSnapshot((), (T1,))
     p = plan(apple, YtmSnapshot({}, frozenset({"v1", "v2", "v7"})), owned={"v1": "1", "v2": "2"})
     assert p.ops == (Unlike("v2"),)  # v7 is the user's own like: untouched
+
+
+def test_add_only_keeps_unfavorited_owned_like() -> None:
+    apple = AppleSnapshot((), (T1,))
+    ytm = YtmSnapshot({}, frozenset({"v1", "v2"}))
+    p = plan(apple, ytm, owned={"v1": "1", "v2": "2"}, remove_likes=False)
+    assert p.ops == ()
+
+
+def test_add_only_forgets_owned_like_already_gone() -> None:
+    apple = AppleSnapshot((), (T2,))
+    p = plan(apple, YtmSnapshot({}, frozenset({"v2"})), owned={"v1": "1"}, remove_likes=False)
+    assert p.ops == (ForgetLike("v1"),)
+
+
+def test_add_only_still_likes_new_favorites() -> None:
+    apple = AppleSnapshot((), (T1, T2))
+    p = plan(apple, YtmSnapshot({}, frozenset({"v2", "v3"})), owned={"v3": "3"}, remove_likes=False)
+    assert p.ops == (Like("v1", "1"),)
 
 
 def test_owned_like_already_gone_is_forgotten() -> None:

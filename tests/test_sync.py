@@ -1,8 +1,9 @@
+import logging
 from pathlib import Path
 
 import pytest
 
-from ammirror.config import SyncConfig
+from ammirror.config import LikesMode, SyncConfig
 from ammirror.errors import AuthError
 from ammirror.match import search_query
 from ammirror.models import (
@@ -208,6 +209,31 @@ def test_run_sync_end_to_end_and_idempotent(state: State) -> None:
     assert again.plan.ops == ()
 
 
+def test_run_sync_add_only_keeps_unfavorited_likes_until_mirror(
+    state: State, caplog: pytest.LogCaptureFixture
+) -> None:
+    t1, t2 = track(1), track(2)
+    apple = FakeApple(playlists=[(GYM, [])], favorites=[t1, t2])
+    ytm = ytm_for(t1, t2)
+    add_only = SyncConfig(likes=LikesMode.ADD_ONLY)
+    run_sync(add_only, apple, ytm, state)
+    assert ytm.liked == {"v1", "v2"}
+
+    apple.favorites = [t1]
+    with caplog.at_level(logging.DEBUG, logger="ammirror"):
+        report = run_sync(add_only, apple, ytm, state)
+    assert report.plan.ops == ()
+    assert ytm.liked == {"v1", "v2"}
+    assert state.owned_likes() == {"v1": "1", "v2": "2"}
+    assert "likes: add-only" in caplog.text
+    assert "1 unlike skipped (add-only)" in caplog.text
+
+    report = run_sync(SyncConfig(), apple, ytm, state)
+    assert report.plan.ops == (Unlike("v2"),)
+    assert ytm.liked == {"v1"}
+    assert state.owned_likes() == {"v1": "1"}
+
+
 def test_run_sync_likes_favorite_without_catalog_id(state: State) -> None:
     fav = track(1, catalog=False)
     apple = FakeApple(playlists=[(GYM, [])], favorites=[fav])
@@ -255,7 +281,7 @@ def test_run_sync_removal_and_missing_names(state: State) -> None:
     t1, t2 = track(1), track(2)
     ytm = ytm_for(t1, t2)
     apple = FakeApple(playlists=[(GYM, [t1, t2])])
-    cfg = SyncConfig(playlists=("Gym", "Nope"), likes=False)
+    cfg = SyncConfig(playlists=("Gym", "Nope"), likes=LikesMode.OFF)
     run_sync(cfg, apple, ytm, state)
     apple.playlists = [(GYM, [t1])]
     report = run_sync(cfg, apple, ytm, state)
@@ -269,9 +295,9 @@ def test_run_sync_skips_failing_playlist_without_forgetting(state: State) -> Non
     t1 = track(1)
     ytm = ytm_for(t1)
     apple = FakeApple(playlists=[(GYM, [t1])])
-    run_sync(SyncConfig(likes=False), apple, ytm, state)
+    run_sync(SyncConfig(likes=LikesMode.OFF), apple, ytm, state)
     apple.failing_playlists = {"p.gym"}
-    report = run_sync(SyncConfig(likes=False), apple, ytm, state)
+    report = run_sync(SyncConfig(likes=LikesMode.OFF), apple, ytm, state)
     assert "p.gym" in state.playlist_mappings()
     assert report.errors == ["skipped 'Gym': fake failure for p.gym"]
     assert report.warnings == []
@@ -281,9 +307,9 @@ def test_run_sync_ytm_playlist_read_failure_skips_playlist(state: State) -> None
     t1 = track(1)
     ytm = ytm_for(t1)
     apple = FakeApple(playlists=[(GYM, [t1])])
-    run_sync(SyncConfig(likes=False), apple, ytm, state)
+    run_sync(SyncConfig(likes=LikesMode.OFF), apple, ytm, state)
     ytm.fail_on = {"get_playlist"}
-    report = run_sync(SyncConfig(likes=False), apple, ytm, state)
+    report = run_sync(SyncConfig(likes=LikesMode.OFF), apple, ytm, state)
     assert report.plan.ops == ()
     assert report.errors == ["skipped 'Gym': fake failure in get_playlist"]
     assert report.warnings == []
@@ -292,14 +318,16 @@ def test_run_sync_ytm_playlist_read_failure_skips_playlist(state: State) -> None
 def test_run_sync_search_failure_is_an_error(state: State) -> None:
     apple = FakeApple(playlists=[(GYM, [track(1)])])
     ytm = FakeYtm(fail_on={"search_songs"})
-    report = run_sync(SyncConfig(likes=False), apple, ytm, state, dry_run=True)
+    report = run_sync(SyncConfig(likes=LikesMode.OFF), apple, ytm, state, dry_run=True)
     assert len(report.errors) == 1 and "search failed" in report.errors[0]
     assert report.warnings == []
 
 
 def test_run_sync_counts_unmatched(state: State) -> None:
     t1 = track(1)
-    report = run_sync(SyncConfig(likes=False), FakeApple(playlists=[(GYM, [t1])]), FakeYtm(), state)
+    report = run_sync(
+        SyncConfig(likes=LikesMode.OFF), FakeApple(playlists=[(GYM, [t1])]), FakeYtm(), state
+    )
     assert report.unmatched == 1
 
 
@@ -308,17 +336,17 @@ def test_run_sync_unselected_playlist_keeps_mapping_and_reuses_mirror(state: Sta
     ytm = ytm_for(t1)
     other = ApplePlaylist("p.other", "Other")
     apple = FakeApple(playlists=[(GYM, [t1]), (other, [])])
-    run_sync(SyncConfig(playlists=("Gym",), likes=False), apple, ytm, state)
+    run_sync(SyncConfig(playlists=("Gym",), likes=LikesMode.OFF), apple, ytm, state)
     pid = state.playlist_mappings()["p.gym"].ytm_playlist_id
 
-    unselected = run_sync(SyncConfig(playlists=("Other",), likes=False), apple, ytm, state)
+    unselected = run_sync(SyncConfig(playlists=("Other",), likes=LikesMode.OFF), apple, ytm, state)
     assert all(
         not isinstance(op, CreatePlaylist) or op.apple_playlist_id != "p.gym"
         for op in unselected.plan.ops
     )
     assert state.playlist_mappings()["p.gym"].ytm_playlist_id == pid
 
-    again = run_sync(SyncConfig(playlists=("Gym",), likes=False), apple, ytm, state)
+    again = run_sync(SyncConfig(playlists=("Gym",), likes=LikesMode.OFF), apple, ytm, state)
     assert again.plan.ops == ()
     assert [c for c in ytm.calls if c[0] == "create_playlist"] == [
         ("create_playlist", "Gym"),

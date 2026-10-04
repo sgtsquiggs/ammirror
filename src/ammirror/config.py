@@ -2,6 +2,7 @@ import os
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -49,10 +50,18 @@ class AppleConfig:
     team_id: str
 
 
+class LikesMode(StrEnum):
+    """How Favorite Songs are mirrored as likes on YouTube Music."""
+
+    OFF = "off"
+    MIRROR = "mirror"  # like new favorites; unlike owned likes that are unfavorited
+    ADD_ONLY = "add-only"  # like new favorites; never unlike
+
+
 @dataclass(frozen=True)
 class SyncConfig:
     playlists: tuple[str, ...] = ("*",)
-    likes: bool = True
+    likes: LikesMode = LikesMode.MIRROR
     mirror_prefix: str = ""
     favorites_playlist: str = "Favorite Songs"
 
@@ -97,9 +106,15 @@ def load_config(path: Path) -> Config:
     playlists = sync.get("playlists", ["*"])
     if not isinstance(playlists, list) or not all(isinstance(p, str) for p in playlists):
         raise ConfigError("sync.playlists must be a list of strings")
-    likes = sync.get("likes", True)
-    if not isinstance(likes, bool):
-        raise ConfigError("sync.likes must be true or false")
+    raw_likes = sync.get("likes", True)
+    if raw_likes is True:
+        likes = LikesMode.MIRROR
+    elif raw_likes is False:
+        likes = LikesMode.OFF
+    elif raw_likes == "add-only":
+        likes = LikesMode.ADD_ONLY
+    else:
+        raise ConfigError('sync.likes must be true, false, or "add-only"')
     prefix = sync.get("mirror_prefix", "")
     if not isinstance(prefix, str):
         raise ConfigError("sync.mirror_prefix must be a string")

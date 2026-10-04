@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ammirror.config import Paths, load_config, write_secret
+from ammirror.config import LikesMode, Paths, load_config, write_secret
 from ammirror.errors import AuthError, ConfigError
 
 GOOD = """
@@ -44,7 +44,7 @@ def test_load_config(tmp_path: Path) -> None:
     assert cfg.apple.key_id == "ABCDE12345"
     assert cfg.apple.team_id == "FGHIJ67890"
     assert cfg.sync.playlists == ("Gym", "Chill")
-    assert cfg.sync.likes is False
+    assert cfg.sync.likes is LikesMode.OFF
     assert cfg.sync.mirror_prefix == "AM: "
     assert cfg.sync.favorites_playlist == "Lieblingssongs"
 
@@ -54,7 +54,7 @@ def test_load_config_sync_defaults(tmp_path: Path) -> None:
     f.write_text(GOOD.split("[sync]")[0])
     cfg = load_config(f)
     assert cfg.sync.playlists == ("*",)
-    assert cfg.sync.likes is True
+    assert cfg.sync.likes is LikesMode.MIRROR
     assert cfg.sync.mirror_prefix == ""
     assert cfg.sync.favorites_playlist == "Favorite Songs"
 
@@ -71,6 +71,16 @@ def test_load_config_missing_file(tmp_path: Path) -> None:
         ("[sync]\nlikes = true\n", r"\[apple\]"),
         ('[apple]\nkey_path = "x"\nkey_id = ""\nteam_id = "T"\n', "key_id"),
         (GOOD.replace("likes = false", 'likes = "yes"'), "likes"),
+        (
+            GOOD.replace("likes = false", 'likes = "nope"'),
+            'sync.likes must be true, false, or "add-only"',
+        ),
+        (
+            GOOD.replace("likes = false", "likes = 1"),
+            'sync.likes must be true, false, or "add-only"',
+        ),
+        (GOOD.replace("likes = false", 'likes = "add_only"'), "add-only"),
+        (GOOD.replace("likes = false", 'likes = "Add-Only"'), "add-only"),
         (GOOD.replace('["Gym", "Chill"]', '"Gym"'), "playlists"),
         (GOOD.replace('"Lieblingssongs"', '""'), "favorites_playlist"),
         (GOOD.replace('"Lieblingssongs"', "3"), "favorites_playlist"),
@@ -110,3 +120,13 @@ def test_load_config_not_utf8_is_config_error(tmp_path: Path) -> None:
     f.write_bytes(b'[apple]\nkey_id = "\xff\xfe"\n')
     with pytest.raises(ConfigError, match="cannot read"):
         load_config(f)
+
+
+@pytest.mark.parametrize(
+    "value, mode",
+    [("true", LikesMode.MIRROR), ("false", LikesMode.OFF), ('"add-only"', LikesMode.ADD_ONLY)],
+)
+def test_load_config_likes_modes(tmp_path: Path, value: str, mode: LikesMode) -> None:
+    f = tmp_path / "config.toml"
+    f.write_text(GOOD.replace("likes = false", f"likes = {value}"))
+    assert load_config(f).sync.likes is mode
