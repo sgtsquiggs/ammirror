@@ -109,7 +109,11 @@ def plan_sync(
         removes = tuple(i for i in current.items if i.video_id not in wanted)
         if adds:
             ops.append(AddItems(current.id, title, adds))
-        if removes:
+        if removes and not tracks:
+            # An empty read wiping a whole mirror is far more likely an Apple glitch
+            # than a playlist the user emptied; leave the mirror alone this run.
+            warnings.append(f"'{playlist.name}' returned no tracks from Apple; skipping removals")
+        elif removes:
             ops.append(RemoveItems(current.id, title, removes))
 
     if apple.favorites is not None:
@@ -122,6 +126,10 @@ def plan_sync(
             if video_id not in ytm.liked:
                 ops.append(Like(video_id, apple_id))
         favorite_keys = {t.key for t in apple.favorites}
+        if not apple.favorites and owned_likes:
+            # Same guard as for playlists: never unlike everything on an empty read.
+            warnings.append("Apple returned no favorites; skipping like removals")
+            owned_likes = {}
         for video_id, apple_id in owned_likes.items():
             if video_id in favorites:
                 continue

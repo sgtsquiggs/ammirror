@@ -121,9 +121,56 @@ def test_owned_like_removed_when_unfavorited() -> None:
 
 
 def test_owned_like_already_gone_is_forgotten() -> None:
-    apple = AppleSnapshot((), ())
-    p = plan(apple, YtmSnapshot({}, frozenset()), owned={"v1": "1"})
+    apple = AppleSnapshot((), (T2,))
+    p = plan(apple, YtmSnapshot({}, frozenset({"v2"})), owned={"v1": "1"})
     assert p.ops == (ForgetLike("v1"),)
+
+
+def test_empty_favorites_skip_like_removals_with_warning() -> None:
+    apple = AppleSnapshot((), ())
+    p = plan(apple, YtmSnapshot({}, frozenset({"v1"})), owned={"v1": "1", "v2": "2"})
+    assert p.ops == ()
+    assert p.warnings == ("Apple returned no favorites; skipping like removals",)
+
+
+def test_empty_favorites_without_owned_likes_is_quiet() -> None:
+    p = plan(AppleSnapshot((), ()), YtmSnapshot({}, frozenset({"v1"})))
+    assert p.ops == ()
+    assert p.warnings == ()
+
+
+def test_unfavoriting_all_but_one_still_unlikes() -> None:
+    apple = AppleSnapshot((), (T3,))
+    ytm = YtmSnapshot({}, frozenset({"v1", "v2", "v3"}))
+    p = plan(apple, ytm, owned={"v1": "1", "v2": "2", "v3": "3"})
+    assert p.ops == (Unlike("v1"), Unlike("v2"))
+    assert p.warnings == ()
+
+
+def test_empty_apple_playlist_skips_removals_with_warning() -> None:
+    apple = AppleSnapshot(((ApplePlaylist("p.gym", "Lifting"), ()),), None)
+    ytm = YtmSnapshot({"PL": YtmPlaylist("PL", "Gym", (item("v1"), item("v2")))}, frozenset())
+    p = plan(apple, ytm, {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")})
+    assert p.ops == (RenamePlaylist("p.gym", "PL", "Lifting", "Lifting"),)
+    assert p.warnings == ("'Lifting' returned no tracks from Apple; skipping removals",)
+
+
+def test_empty_apple_playlist_with_empty_mirror_is_quiet() -> None:
+    apple = AppleSnapshot(((GYM, ()),), None)
+    ytm = YtmSnapshot({"PL": YtmPlaylist("PL", "Gym", ())}, frozenset())
+    p = plan(apple, ytm, {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")})
+    assert p.ops == ()
+    assert p.warnings == ()
+
+
+def test_shrinking_playlist_to_one_track_still_removes() -> None:
+    apple = AppleSnapshot(((GYM, (T1,)),), None)
+    ytm = YtmSnapshot(
+        {"PL": YtmPlaylist("PL", "Gym", (item("v1"), item("v2"), item("v3")))}, frozenset()
+    )
+    p = plan(apple, ytm, {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")})
+    assert p.ops == (RemoveItems("PL", "Gym", (item("v2"), item("v3"))),)
+    assert p.warnings == ()
 
 
 def test_likes_disabled_touches_nothing() -> None:
