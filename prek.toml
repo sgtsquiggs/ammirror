@@ -1,0 +1,51 @@
+# Git hooks managed by prek (https://prek.j178.dev). Set up once per clone:
+#   prek install
+# Run every hook on every file:
+#   prek run --all-files
+# CI runs the same hooks with j178/prek-action.
+
+minimum_prek_version = "0.4.0"
+default_install_hook_types = ["pre-commit", "commit-msg"]
+
+# File hygiene, built into prek.
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "mixed-line-ending", args = ["--fix=lf"] },
+  { id = "check-yaml" },
+  { id = "check-toml" },
+  { id = "check-json" },
+  { id = "check-merge-conflict" },
+  { id = "check-added-large-files" },
+  { id = "check-executables-have-shebangs" },
+  { id = "check-shebang-scripts-are-executable" },
+  { id = "detect-private-key" },
+]
+
+# Ruff lint (with fixes) and format.
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.16.10"
+hooks = [{ id = "ruff-check", args = ["--fix"] }, { id = "ruff-format" }]
+
+# Type checking with the project's pinned pyright, through uv.
+[[repos]]
+repo = "local"
+hooks = [
+  { id = "pyright", name = "pyright", entry = "uv run pyright", language = "system", types = ["python"], pass_filenames = false },
+]
+
+# Conventional Commits, checked by commitlint with commitlint.config.mjs; see
+# CONTRIBUTING.md. Needs Node.js, which prek uses from the system or installs.
+# CI runs the same hook on every pushed commit
+# (.github/scripts/check-commit-messages.sh). The upstream hook reads
+# .git/COMMIT_EDITMSG; pass_filenames makes it check the file prek passes, so
+# `prek run --commit-msg-filename` works too.
+[[repos]]
+repo = "https://github.com/alessandrojcm/commitlint-pre-commit-hook"
+rev = "v9.27.0"
+hooks = [
+  { id = "commitlint", stages = ["commit-msg"], pass_filenames = true, additional_dependencies = ["@commitlint/config-conventional@21.2.3"] },
+]

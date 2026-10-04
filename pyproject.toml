@@ -1,0 +1,44 @@
+[project]
+name = "ammirror"
+version = "0.1.0"
+description = "Mirror Apple Music playlists and Favorite Songs into YouTube Music"
+license = "MIT"
+authors = [
+    { name = "Matthew Crenshaw", email = "matthew@squig.gs" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.5.0",
+    "httpx>=0.28.1",
+    "pyjwt[crypto]>=2.15.1",
+    "ytmusicapi>=1.12",
+]
+
+[project.scripts]
+ammirror = "ammirror.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+include = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
