@@ -9,6 +9,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from ammirror.cli import cli
 from ammirror.config import Paths
+from ammirror.match import search_query
+from ammirror.models import ApplePlaylist
+from ammirror.state import State
+from tests.factories import cand, track
+from tests.fakes import FakeApple, FakeYtm
 
 
 def test_version() -> None:
@@ -78,3 +83,74 @@ def test_auth_ytm_runs_setup(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> N
 def test_auth_ytm_empty_input(paths: Paths) -> None:
     result = CliRunner().invoke(cli, ["auth", "ytm"], input="")
     assert result.exit_code == 2
+
+
+@pytest.fixture
+def fakes(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> tuple[FakeApple, FakeYtm]:
+    write_config(paths, '[sync]\nplaylists = ["Gym"]\nlikes = false\n')
+    t1, t2 = track(1), track(2, title="Obscure")
+    apple = FakeApple(
+        playlists=[(ApplePlaylist("p.gym", "Gym"), [t1, t2]), (ApplePlaylist("p.x", "Other"), [])]
+    )
+    ytm = FakeYtm(search_results={search_query(t1): [cand("v1", t1.title)]})
+    monkeypatch.setattr("ammirror.cli.make_apple", lambda _p, _c: apple)
+    monkeypatch.setattr("ammirror.cli.make_ytm", lambda _p: ytm)
+    return apple, ytm
+
+
+@pytest.mark.usefixtures("fakes")
+def test_playlists_marks_selected_and_mirrored() -> None:
+    out = CliRunner().invoke(cli, ["playlists"]).output
+    assert "Gym" in out and "Other" in out
+    CliRunner().invoke(cli, ["sync"])
+    out = CliRunner().invoke(cli, ["playlists"]).output
+    gym_line = next(line for line in out.splitlines() if "Gym" in line)
+    assert "mirrored" in gym_line
+
+
+def test_sync_dry_run_prints_plan(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    _, ytm = fakes
+    result = CliRunner().invoke(cli, ["sync", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "create playlist 'Gym' with 1 track" in result.output
+    assert "1 unmatched" in result.output
+    assert ytm.playlists == {}
+
+
+def test_sync_applies_and_reports(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    _, ytm = fakes
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 0, result.output
+    assert len(ytm.playlists) == 1
+    assert "applied 1" in result.output
+
+
+def test_sync_partial_failure_exits_1(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    _, ytm = fakes
+    ytm.fail_on = {"create_playlist"}
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 1
+    assert "failed" in result.output
+
+
+@pytest.mark.usefixtures("fakes")
+def test_unmatched_and_pin(paths: Paths) -> None:
+    CliRunner().invoke(cli, ["sync"])
+    out = CliRunner().invoke(cli, ["unmatched"]).output
+    assert "Obscure" in out and "2" in out
+    result = CliRunner().invoke(cli, ["pin", "2", "vPINNED"])
+    assert result.exit_code == 0
+    assert "Obscure" not in CliRunner().invoke(cli, ["unmatched"]).output
+    state = State(paths.state_db)
+    try:
+        assert state.get_match("2") is not None
+    finally:
+        state.close()
+
+
+def test_sync_missing_ytm_auth_exits_2(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_config(paths)
+    monkeypatch.setattr("ammirror.cli.make_apple", lambda _p, _c: FakeApple())
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 2
+    assert "ammirror auth ytm" in result.output
