@@ -53,10 +53,14 @@ key_id = "XXXXXXXXXX"
 team_id = "YYYYYYYYYY"
 
 [sync]
-# Exact Apple Music playlist names to mirror, or ["*"] for all. Default: all.
+# Apple Music playlist names to mirror, or ["*"] for all. Default: all.
+# Names match regardless of case, spacing, and curly vs straight quotes.
 playlists = ["*"]
 # Mirror Favorite Songs as likes on YouTube Music. Default: true.
 likes = true
+# Name of the library playlist Apple generates for your favorites. Apple
+# localizes it, so change this if yours is not called "Favorite Songs".
+favorites_playlist = "Favorite Songs"
 # Text prepended to the name of each mirrored playlist on YouTube Music.
 mirror_prefix = ""
 ```

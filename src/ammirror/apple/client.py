@@ -7,19 +7,17 @@ import httpx
 from ammirror.apple.token import load_developer_token
 from ammirror.config import Config, Paths
 from ammirror.errors import AuthError, ServiceError
-from ammirror.models import ApplePlaylist, AppleTrack
+from ammirror.models import ApplePlaylist, AppleTrack, normalize_playlist_name
 
 API = "https://api.music.apple.com"
 PAGE_LIMIT = 100
-# Extra query params for the library-songs walk that surface `inFavorites` (see probe results).
-FAVORITES_PARAMS: dict[str, str] = {}
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 
 class AppleLibrary(Protocol):
     def library_playlists(self) -> list[ApplePlaylist]: ...
     def playlist_tracks(self, playlist_id: str) -> list[AppleTrack]: ...
-    def favorite_songs(self) -> list[AppleTrack]: ...
+    def favorite_songs(self, playlist_name: str) -> list[AppleTrack]: ...
 
 
 def _parse_track(item: dict[str, Any]) -> AppleTrack | None:
@@ -40,13 +38,6 @@ def _parse_track(item: dict[str, Any]) -> AppleTrack | None:
         duration_ms=cattrs.get("durationInMillis") or attrs.get("durationInMillis"),
         isrc=cattrs.get("isrc"),
     )
-
-
-def _in_favorites(item: dict[str, Any]) -> bool:
-    if (item.get("attributes") or {}).get("inFavorites"):
-        return True
-    catalog = ((item.get("relationships") or {}).get("catalog") or {}).get("data") or []
-    return any((c.get("attributes") or {}).get("inFavorites") for c in catalog)
 
 
 class AppleClient:
@@ -141,9 +132,17 @@ class AppleClient:
         )
         return [t for item in items if (t := _parse_track(item))]
 
-    def favorite_songs(self) -> list[AppleTrack]:
-        items = self._paginate(
-            "/v1/me/library/songs",
-            {"include": "catalog", "limit": str(PAGE_LIMIT), **FAVORITES_PARAMS},
+    def favorite_songs(self, playlist_name: str) -> list[AppleTrack]:
+        """Read favorites from Apple's auto-generated favorites playlist.
+
+        The library songs endpoint only reports `inFavorites` with `extend=inFavorites`,
+        which is slow and misses favorited songs not in the library.
+        """
+        wanted = normalize_playlist_name(playlist_name)
+        for playlist in self.library_playlists():
+            if normalize_playlist_name(playlist.name) == wanted:
+                return self.playlist_tracks(playlist.id)
+        raise ServiceError(
+            f"no Apple Music playlist named '{playlist_name}' for favorites;"
+            " set sync.favorites_playlist"
         )
-        return [t for item in items if _in_favorites(item) and (t := _parse_track(item))]

@@ -73,6 +73,8 @@ class FakeApple:
     playlists: list[tuple[ApplePlaylist, list[AppleTrack]]] = field(default_factory=list)
     favorites: list[AppleTrack] = field(default_factory=list)
     failing_playlists: set[str] = field(default_factory=set)
+    favorites_error: str | None = None
+    favorites_requests: list[str] = field(default_factory=list)
 
     def library_playlists(self) -> list[ApplePlaylist]:
         return [p for p, _ in self.playlists]
@@ -82,5 +84,8 @@ class FakeApple:
             raise ServiceError(f"fake failure for {playlist_id}")
         return next(ts for p, ts in self.playlists if p.id == playlist_id)
 
-    def favorite_songs(self) -> list[AppleTrack]:
+    def favorite_songs(self, playlist_name: str) -> list[AppleTrack]:
+        self.favorites_requests.append(playlist_name)
+        if self.favorites_error is not None:
+            raise ServiceError(self.favorites_error)
         return list(self.favorites)

@@ -19,15 +19,13 @@ def client(handler: Handler, sleeps: list[float] | None = None) -> AppleClient:
     )
 
 
-def lib_song(n: int, *, catalog: bool = True, fav: bool | None = None) -> dict:
+def lib_song(n: int, *, catalog: bool = True) -> dict:
     attrs: dict = {
         "name": f"Lib Song {n}",
         "artistName": "Lib Artist",
         "albumName": "Lib Album",
         "durationInMillis": 1000 * n,
     }
-    if fav is not None:
-        attrs["inFavorites"] = fav
     item: dict = {"id": f"i.{n}", "type": "library-songs", "attributes": attrs}
     item["relationships"] = {
         "catalog": {
@@ -107,14 +105,30 @@ def test_empty_playlist_404_is_empty() -> None:
     assert client(lambda _r: httpx.Response(404)).playlist_tracks("p.1") == []
 
 
-def test_favorite_songs_filters_in_favorites() -> None:
-    def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url.path == "/v1/me/library/songs"
+def favorites_handler(req: httpx.Request) -> httpx.Response:
+    if req.url.path == "/v1/me/library/playlists":
         return httpx.Response(
-            200, json={"data": [lib_song(1, fav=True), lib_song(2, fav=False), lib_song(3)]}
+            200,
+            json={
+                "data": [
+                    {"id": "p.other", "attributes": {"name": "Other"}},
+                    {"id": "p.fav", "attributes": {"name": "Favorite Songs"}},
+                ]
+            },
         )
+    assert req.url.path == "/v1/me/library/playlists/p.fav/tracks"
+    assert req.url.params["include"] == "catalog"
+    return httpx.Response(200, json={"data": [lib_song(1), lib_song(2)]})
 
-    assert [t.catalog_id for t in client(handler).favorite_songs()] == ["100"]
+
+def test_favorite_songs_reads_the_favorites_playlist() -> None:
+    tracks = client(favorites_handler).favorite_songs("favorite  songs")
+    assert [t.catalog_id for t in tracks] == ["100", "200"]
+
+
+def test_favorite_songs_without_matching_playlist_is_an_error() -> None:
+    with pytest.raises(ServiceError, match=r"'Lieblingssongs'.*sync\.favorites_playlist"):
+        client(favorites_handler).favorite_songs("Lieblingssongs")
 
 
 @pytest.mark.parametrize("status", [401, 403])
@@ -149,9 +163,9 @@ def test_library_playlists_404_is_an_error() -> None:
         client(lambda _r: httpx.Response(404)).library_playlists()
 
 
-def test_favorite_songs_404_is_an_error() -> None:
+def test_favorite_songs_playlist_list_404_is_an_error() -> None:
     with pytest.raises(ServiceError, match="404"):
-        client(lambda _r: httpx.Response(404)).favorite_songs()
+        client(lambda _r: httpx.Response(404)).favorite_songs("Favorite Songs")
 
 
 def test_non_json_response_is_service_error() -> None:

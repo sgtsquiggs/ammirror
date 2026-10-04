@@ -16,6 +16,7 @@ team_id = "FGHIJ67890"
 playlists = ["Gym", "Chill"]
 likes = false
 mirror_prefix = "AM: "
+favorites_playlist = "Lieblingssongs"
 """
 
 
@@ -45,6 +46,7 @@ def test_load_config(tmp_path: Path) -> None:
     assert cfg.sync.playlists == ("Gym", "Chill")
     assert cfg.sync.likes is False
     assert cfg.sync.mirror_prefix == "AM: "
+    assert cfg.sync.favorites_playlist == "Lieblingssongs"
 
 
 def test_load_config_sync_defaults(tmp_path: Path) -> None:
@@ -54,6 +56,7 @@ def test_load_config_sync_defaults(tmp_path: Path) -> None:
     assert cfg.sync.playlists == ("*",)
     assert cfg.sync.likes is True
     assert cfg.sync.mirror_prefix == ""
+    assert cfg.sync.favorites_playlist == "Favorite Songs"
 
 
 def test_load_config_missing_file(tmp_path: Path) -> None:
@@ -69,6 +72,8 @@ def test_load_config_missing_file(tmp_path: Path) -> None:
         ('[apple]\nkey_path = "x"\nkey_id = ""\nteam_id = "T"\n', "key_id"),
         (GOOD.replace("likes = false", 'likes = "yes"'), "likes"),
         (GOOD.replace('["Gym", "Chill"]', '"Gym"'), "playlists"),
+        (GOOD.replace('"Lieblingssongs"', '""'), "favorites_playlist"),
+        (GOOD.replace('"Lieblingssongs"', "3"), "favorites_playlist"),
     ],
 )
 def test_load_config_invalid(tmp_path: Path, text: str, msg: str) -> None:

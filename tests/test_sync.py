@@ -177,6 +177,29 @@ def test_run_sync_end_to_end_and_idempotent(state: State) -> None:
     assert again.plan.ops == ()
 
 
+def test_run_sync_passes_favorites_playlist_name(state: State) -> None:
+    apple = FakeApple(playlists=[(GYM, [])], favorites=[track(1)])
+    run_sync(SyncConfig(favorites_playlist="Lieblingssongs"), apple, ytm_for(track(1)), state)
+    assert apple.favorites_requests == ["Lieblingssongs"]
+
+
+def test_run_sync_favorites_failure_is_an_error_and_skips_likes(state: State) -> None:
+    t1 = track(1)
+    apple = FakeApple(playlists=[(GYM, [t1])], favorites_error="no favorites playlist")
+    ytm = ytm_for(t1)
+    ytm.liked = {"vOLD"}
+    state.add_owned_like("vOLD", "99")
+    report = run_sync(SyncConfig(), apple, ytm, state)
+    assert report.errors == ["no favorites playlist"]
+    assert report.result is not None and report.result.failures == []
+    pid = state.playlist_mappings()["p.gym"].ytm_playlist_id
+    assert [i.video_id for i in ytm.playlists[pid].items] == ["v1"]
+    assert not any(isinstance(op, Like | Unlike | ForgetLike) for op in report.plan.ops)
+    assert ytm.liked == {"vOLD"}
+    assert state.owned_likes() == {"vOLD": "99"}
+    assert "liked_video_ids" not in [c[0] for c in ytm.calls]
+
+
 def test_run_sync_dry_run_changes_nothing_on_ytm(state: State) -> None:
     t1 = track(1)
     ytm = ytm_for(t1)

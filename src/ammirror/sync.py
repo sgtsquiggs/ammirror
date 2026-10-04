@@ -293,13 +293,20 @@ def run_sync(
                 continue
         fetched.append((p, tracks))
 
-    favorites = tuple(apple.favorite_songs()) if cfg.likes else None
+    likes = cfg.likes
+    favorites: tuple[AppleTrack, ...] | None = None
+    if likes:
+        try:
+            favorites = tuple(apple.favorite_songs(cfg.favorites_playlist))
+        except ServiceError as e:
+            errors.append(str(e))
+            likes = False  # a favorites failure must not abort the playlists
     all_tracks = [t for _, ts in fetched for t in ts] + list(favorites or ())
     resolutions, search_errors = resolve_tracks(
         all_tracks, state, ytm, retry_unmatched=retry_unmatched
     )
     errors += search_errors
-    liked = frozenset(ytm.liked_video_ids()) if cfg.likes else frozenset()
+    liked = frozenset(ytm.liked_video_ids()) if likes else frozenset()
 
     plan = plan_sync(
         AppleSnapshot(tuple(fetched), favorites),
