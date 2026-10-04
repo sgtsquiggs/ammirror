@@ -109,8 +109,15 @@ def plan_sync(
         for video_id, apple_id in favorites.items():
             if video_id not in ytm.liked:
                 ops.append(Like(video_id, apple_id))
-        for video_id in owned_likes:
+        favorite_keys = {t.key for t in apple.favorites}
+        for video_id, apple_id in owned_likes.items():
             if video_id in favorites:
+                continue
+            if apple_id in favorite_keys:
+                res = resolutions.get(apple_id)
+                if not isinstance(res, Matched) or res.video_id == video_id:
+                    continue
+                ops.append(Unlike(video_id))
                 continue
             ops.append(Unlike(video_id) if video_id in ytm.liked else ForgetLike(video_id))
 

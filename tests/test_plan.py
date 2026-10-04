@@ -43,7 +43,13 @@ def plan(
 ) -> Plan:
     managed = {p.id for p, _ in apple.playlists}
     return plan_sync(
-        apple, res or RES, ytm, mappings or {}, owned or {}, managed_ids=managed, prefix=prefix
+        apple,
+        RES if res is None else res,
+        ytm,
+        mappings or {},
+        owned or {},
+        managed_ids=managed,
+        prefix=prefix,
     )
 
 
@@ -132,6 +138,33 @@ def test_likes_disabled_touches_nothing() -> None:
     apple = AppleSnapshot((), None)
     p = plan(apple, YtmSnapshot({}, frozenset({"v1"})), owned={"v1": "1"})
     assert p.ops == ()
+
+
+def test_owned_like_whose_favorite_is_now_unmatched() -> None:
+    apple = AppleSnapshot((), (T1,))
+    unmatched: dict[str, Resolution] = {**RES, "1": Unmatched(UnmatchedReason.LOW_SCORE)}
+    p = plan(apple, YtmSnapshot({}, frozenset()), owned={"v1": "1"}, res=unmatched)
+    assert p.ops == ()
+
+
+def test_owned_like_whose_favorite_is_rematched_to_different_video() -> None:
+    apple = AppleSnapshot((), (T1,))
+    rematched: dict[str, Resolution] = {**RES, "1": Matched("v3", 0.9, "pin")}
+    p = plan(apple, YtmSnapshot({}, frozenset()), owned={"v1": "1"}, res=rematched)
+    assert p.ops == (Like("v3", "1"), Unlike("v1"))
+
+
+def test_owned_like_still_favorited_but_not_yet_liked() -> None:
+    apple = AppleSnapshot((), (T1,))
+    p = plan(apple, YtmSnapshot({}, frozenset()), owned={"v1": "1"})
+    assert p.ops == (Like("v1", "1"),)
+
+
+def test_prefix_on_existing_mirror_triggers_rename() -> None:
+    apple = AppleSnapshot(((GYM, (T1,)),), None)
+    ytm = YtmSnapshot({"PL": YtmPlaylist("PL", "Gym", (item("v1"),))}, frozenset())
+    p = plan(apple, ytm, {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")}, prefix="AM: ")
+    assert p.ops == (RenamePlaylist("p.gym", "PL", "Gym", "AM: Gym"),)
 
 
 def test_describe() -> None:
