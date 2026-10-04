@@ -15,7 +15,7 @@ from ammirror.config import Config, Paths, load_config, write_secret
 from ammirror.errors import YTMUSICAPI_HINT, AmmirrorError, AuthError, ConfigError
 from ammirror.state import State
 from ammirror.sync import describe, run_sync, select_playlists
-from ammirror.ytm.client import YtmClient, YtmusicapiClient
+from ammirror.ytm.client import YtmClient, YtmusicapiClient, sanitize_ytm_headers
 
 
 @dataclass
@@ -95,7 +95,7 @@ def auth_ytm(ctx: click.Context) -> None:
     try:
         # Without a filepath, setup only parses the headers and returns the JSON to save,
         # so the credentials are written once, through write_secret, with mode 0600.
-        credentials = ytmusicapi.setup(headers_raw=headers)
+        credentials = ytmusicapi.setup(headers_raw=sanitize_ytm_headers(headers))
     except YTMusicError as e:
         raise ConfigError(f"could not parse pasted headers: {e}") from e
     target = obj.paths.ytm_auth_file

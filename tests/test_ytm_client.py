@@ -6,7 +6,7 @@ from ytmusicapi.exceptions import YTMusicServerError, YTMusicUserError
 
 from ammirror.errors import AuthError, ServiceError
 from ammirror.models import YtmCandidate, YtmPlaylist, YtmPlaylistItem
-from ammirror.ytm.client import YtmusicapiClient
+from ammirror.ytm.client import YtmusicapiClient, sanitize_ytm_headers
 
 
 class StubYT:
@@ -243,3 +243,32 @@ def test_user_error_about_auth_is_auth_error(msg: str) -> None:
     client, _ = make(get_liked_songs=YTMusicUserError(msg))
     with pytest.raises(AuthError):
         client.liked_video_ids()
+
+
+def test_sanitize_ytm_headers_drops_request_line_and_pseudo_headers() -> None:
+    raw = (
+        "POST /youtubei/v1/browse?prettyPrint=false HTTP/3\n"
+        ":authority: music.youtube.com\ncookie: a=b\n"
+    )
+    assert sanitize_ytm_headers(raw) == "cookie: a=b\n"
+
+
+def test_sanitize_ytm_headers_drops_bare_http_version_line() -> None:
+    assert sanitize_ytm_headers("GET / HTTP/1.1\ncookie: a\n") == "cookie: a\n"
+
+
+def test_sanitize_ytm_headers_drops_body_headers_case_insensitively() -> None:
+    raw = "Content-Encoding: gzip\nCONTENT-LENGTH: 12\ncontent-encoding : br\ncookie: a\n"
+    assert sanitize_ytm_headers(raw) == "cookie: a\n"
+
+
+def test_sanitize_ytm_headers_keeps_other_headers_unchanged() -> None:
+    raw = (
+        "cookie: SAPISID=x; __Secure-3PAPISID=y\n"
+        "authorization: SAPISIDHASH 1_abc\n"
+        "x-goog-authuser: 0\n"
+        "x-goog-visitor-id: v\n"
+        "user-agent: Mozilla/5.0 (X11; Linux) Gecko/20100101\n"
+        "content-type: application/json\n"
+    )
+    assert sanitize_ytm_headers(raw) == raw

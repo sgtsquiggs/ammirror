@@ -80,7 +80,9 @@ ammirror auth ytm
 Prints the steps for copying request headers from music.youtube.com in your
 browser's DevTools, then reads the pasted headers from standard input (finish
 with Ctrl-D). ytmusicapi labels this browser authentication as deprecated, but
-it works, and the session lasts about two years.
+it works, and the session lasts about two years. ammirror strips the pasted
+headers that describe the browser's own request body (such as `content-encoding`
+and the HTTP request line), which would otherwise make YouTube reject every call.
 
 Credentials are stored under `~/.config/ammirror/` with mode 0600.
 

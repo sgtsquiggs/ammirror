@@ -1,3 +1,4 @@
+import re
 import time
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
@@ -24,6 +25,30 @@ class YtmClient(Protocol):
     def liked_video_ids(self) -> set[str]: ...
     def like(self, video_id: str) -> None: ...
     def unlike(self, video_id: str) -> None: ...
+
+
+_REQUEST_LINE = re.compile(
+    r"^(?:(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT|TRACE) \S+.*|.* HTTP/\d(?:\.\d)?)$"
+)
+_BODY_HEADERS = frozenset({"content-encoding", "content-length"})
+
+
+def sanitize_ytm_headers(raw: str) -> str:
+    """Drop pasted lines that describe the browser's own request, keep the rest verbatim.
+
+    Firefox's "Copy Request Headers" includes the HTTP request line, HTTP/2-3
+    pseudo-headers, and content-encoding/content-length of the browser's (gzipped)
+    body; ytmusicapi sends plain JSON, so these make YouTube answer HTTP 400.
+    """
+    kept: list[str] = []
+    for line in raw.splitlines(keepends=True):
+        text = line.rstrip("\r\n")
+        if text.startswith(":") or _REQUEST_LINE.match(text):
+            continue
+        if text.partition(":")[0].strip().lower() in _BODY_HEADERS:
+            continue
+        kept.append(line)
+    return "".join(kept)
 
 
 def _chunks[T](items: Sequence[T], size: int) -> Iterator[list[T]]:

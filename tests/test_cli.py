@@ -74,9 +74,13 @@ def test_auth_ytm_runs_setup(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> N
         return '{"cookie": "abc"}'
 
     monkeypatch.setattr(ytmusicapi, "setup", fake_setup)
-    result = CliRunner().invoke(cli, ["auth", "ytm"], input="cookie: abc\nuser-agent: x\n")
+    pasted = (
+        "POST /youtubei/v1/browse?prettyPrint=false HTTP/3\n"
+        "cookie: abc\ncontent-encoding: gzip\ncontent-length: 9\nuser-agent: x\n"
+    )
+    result = CliRunner().invoke(cli, ["auth", "ytm"], input=pasted)
     assert result.exit_code == 0, result.output
-    assert "cookie: abc" in seen["headers"]
+    assert seen["headers"] == "cookie: abc\nuser-agent: x\n"
     assert paths.ytm_auth_file.read_text() == '{"cookie": "abc"}'
     assert stat.S_IMODE(paths.ytm_auth_file.stat().st_mode) == 0o600
 
