@@ -245,3 +245,20 @@ def test_sync_dry_run_help_mentions_local_cache() -> None:
     out = CliRunner().invoke(cli, ["sync", "--help"]).output
     assert "never changes YouTube Music" in " ".join(out.split())
     assert "caches match results locally" in " ".join(out.split())
+
+
+def test_sync_reports_dropped_likes_and_exits_1(
+    paths: Paths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_config(paths, "[sync]\nplaylists = []\nlikes = true\n")
+    t1 = track(1)
+    apple = FakeApple(favorites=[t1])
+    ytm = FakeYtm(search_results={search_query(t1): [cand("v1", t1.title)]}, drop_likes={"v1"})
+    monkeypatch.setattr("ammirror.cli.make_apple", lambda _p, _c: apple)
+    monkeypatch.setattr("ammirror.cli.make_ytm", lambda _p: ytm)
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 1
+    assert f"error: like didn't stick on YouTube Music: {t1.artist} - {t1.title} (v1)" in (
+        result.output
+    )
+    assert "run `ammirror sync` again" in result.output

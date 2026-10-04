@@ -28,6 +28,7 @@ class YtmClient(Protocol):
     def liked_video_ids(self) -> set[str]: ...
     def like(self, video_id: str) -> None: ...
     def unlike(self, video_id: str) -> None: ...
+    def like_status(self, video_id: str) -> str | None: ...
 
 
 _REQUEST_LINE = re.compile(
@@ -219,3 +220,9 @@ class YtmusicapiClient:
 
     def unlike(self, video_id: str) -> None:
         self._write("rate_song", video_id, "INDIFFERENT")
+
+    def like_status(self, video_id: str) -> str | None:
+        data = self._call("get_watch_playlist", videoId=video_id, limit=1) or {}
+        tracks = data.get("tracks") or []
+        status = tracks[0].get("likeStatus") if tracks else None
+        return status if isinstance(status, str) else None

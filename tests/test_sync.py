@@ -22,7 +22,7 @@ from ammirror.models import (
     YtmPlaylistItem,
 )
 from ammirror.state import State
-from ammirror.sync import apply_plan, resolve_tracks, run_sync
+from ammirror.sync import LIKE_VERIFY_DELAY, apply_plan, resolve_tracks, run_sync
 from tests.factories import cand, track
 from tests.fakes import FakeApple, FakeYtm
 
@@ -352,3 +352,121 @@ def test_run_sync_unselected_playlist_keeps_mapping_and_reuses_mirror(state: Sta
         ("create_playlist", "Gym"),
         ("create_playlist", "Other"),
     ]
+
+
+def _names(ytm: FakeYtm) -> list[str]:
+    return [c[0] for c in ytm.calls]
+
+
+def _like_setup(n: int = 3) -> tuple[list, FakeApple, FakeYtm]:
+    favs = [track(i) for i in range(1, n + 1)]
+    return favs, FakeApple(playlists=[(GYM, [])], favorites=favs), ytm_for(*favs)
+
+
+def test_verify_likes_all_stuck(state: State) -> None:
+    _, apple, ytm = _like_setup()
+    sleeps: list[float] = []
+    report = run_sync(SyncConfig(), apple, ytm, state, sleep=sleeps.append)
+    assert report.errors == []
+    assert sleeps == [LIKE_VERIFY_DELAY]
+    assert _names(ytm).count("liked_video_ids") == 2
+    assert "like_status" not in _names(ytm)
+    assert _names(ytm)[-1] == "liked_video_ids"
+
+
+def test_verify_likes_reports_dropped_and_keeps_ownership(state: State) -> None:
+    favs, apple, ytm = _like_setup()
+    ytm.drop_likes = {"v2"}
+    report = run_sync(SyncConfig(), apple, ytm, state, sleep=lambda _s: None)
+    assert report.errors == [
+        f"like didn't stick on YouTube Music: {favs[1].artist} - {favs[1].title} (v2); "
+        "run `ammirror sync` again"
+    ]
+    assert [c for c in ytm.calls if c[0] == "like_status"] == [("like_status", "v2")]
+    assert state.owned_likes() == {"v1": "1", "v2": "2", "v3": "3"}
+    ytm.drop_likes = set()
+    again = run_sync(SyncConfig(), apple, ytm, state, sleep=lambda _s: None)
+    assert again.plan.ops == (Like("v2", "2"),)
+    assert again.errors == []
+
+
+def test_verify_likes_missing_from_list_but_liked_is_not_flagged(state: State) -> None:
+    _, apple, ytm = _like_setup()
+    ytm.hidden_likes = {"v1"}
+    report = run_sync(SyncConfig(), apple, ytm, state, sleep=lambda _s: None)
+    assert report.errors == []
+    assert [c for c in ytm.calls if c[0] == "like_status"] == [("like_status", "v1")]
+
+
+def test_verify_likes_unknown_status_is_not_flagged(state: State) -> None:
+    _, apple, ytm = _like_setup()
+    ytm.drop_likes = {"v1"}
+    ytm.unknown_status = {"v1"}
+    report = run_sync(SyncConfig(), apple, ytm, state, sleep=lambda _s: None)
+    assert report.errors == []
+
+
+def test_verify_likes_read_failure_is_one_error(state: State) -> None:
+    _, apple, ytm = _like_setup()
+
+    class FailsSecondRead(FakeYtm):
+        def liked_video_ids(self) -> set[str]:
+            if self.calls.count(("liked_video_ids",)) >= 1:
+                self.fail_on = {"liked_video_ids"}
+            return super().liked_video_ids()
+
+    ytm2 = FailsSecondRead(search_results=ytm.search_results)
+    report = run_sync(SyncConfig(), apple, ytm2, state, sleep=lambda _s: None)
+    assert len(report.errors) == 1
+    assert report.errors[0].startswith("could not verify likes:")
+    assert "like_status" not in _names(ytm2)
+
+
+def test_verify_likes_auth_error_propagates(state: State) -> None:
+    _, apple, ytm = _like_setup()
+
+    class AuthOnSecondRead(FakeYtm):
+        def liked_video_ids(self) -> set[str]:
+            if self.calls.count(("liked_video_ids",)) >= 1:
+                self.auth_fail_on = {"liked_video_ids"}
+            return super().liked_video_ids()
+
+    with pytest.raises(AuthError):
+        run_sync(
+            SyncConfig(),
+            apple,
+            AuthOnSecondRead(search_results=ytm.search_results),
+            state,
+            sleep=lambda _s: None,
+        )
+
+
+def test_verify_likes_skipped_on_dry_run(state: State) -> None:
+    _, apple, ytm = _like_setup()
+    sleeps: list[float] = []
+    run_sync(SyncConfig(), apple, ytm, state, dry_run=True, sleep=sleeps.append)
+    assert sleeps == []
+    assert _names(ytm).count("liked_video_ids") == 1
+    assert "like_status" not in _names(ytm)
+
+
+def test_verify_likes_skipped_without_applied_likes(state: State) -> None:
+    t1 = track(1)
+    apple = FakeApple(playlists=[(GYM, [t1])], favorites=[])
+    ytm = ytm_for(t1)
+    sleeps: list[float] = []
+    run_sync(SyncConfig(), apple, ytm, state, sleep=sleeps.append)
+    assert sleeps == []
+    assert _names(ytm).count("liked_video_ids") == 1
+
+
+def test_verify_likes_skipped_when_likes_off_or_like_failed(state: State) -> None:
+    _, apple, ytm = _like_setup()
+    sleeps: list[float] = []
+    run_sync(SyncConfig(likes=LikesMode.OFF), apple, ytm, state, sleep=sleeps.append)
+    assert sleeps == []
+    ytm.fail_on = {"like"}
+    report = run_sync(SyncConfig(), apple, ytm, state, sleep=sleeps.append)
+    assert sleeps == []
+    assert report.result is not None and len(report.result.failures) == 3
+    assert report.errors == []

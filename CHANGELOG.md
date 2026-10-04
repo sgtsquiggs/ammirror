@@ -12,6 +12,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   un-favorite. `true` keeps mirroring and `false` leaves likes alone.
 - `-v` and `-vv` global options log progress (verbose) and per-item decisions and
   request details (debug) to stderr. Error tracebacks now need `-vv`.
+- After a sync that liked songs, ammirror checks that the likes stuck, since YouTube
+  Music sometimes silently drops some. Any that didn't are reported as errors (exit
+  code 1); running `ammirror sync` again re-likes them.
 
 ### Fixed
 

@@ -272,3 +272,26 @@ def test_sanitize_ytm_headers_keeps_other_headers_unchanged() -> None:
         "content-type: application/json\n"
     )
     assert sanitize_ytm_headers(raw) == raw
+
+
+def test_like_status_reads_first_watch_track() -> None:
+    client, yt = make(get_watch_playlist={"tracks": [{"videoId": "v1", "likeStatus": "LIKE"}]})
+    assert client.like_status("v1") == "LIKE"
+    assert yt.calls[0] == ("get_watch_playlist", (), {"videoId": "v1", "limit": 1})
+
+
+def test_like_status_indifferent() -> None:
+    client, _ = make(get_watch_playlist={"tracks": [{"likeStatus": "INDIFFERENT"}]})
+    assert client.like_status("v1") == "INDIFFERENT"
+
+
+@pytest.mark.parametrize("response", [{"tracks": []}, {}, None, {"tracks": [{"videoId": "v1"}]}])
+def test_like_status_unknown_is_none(response: Any) -> None:
+    client, _ = make(get_watch_playlist=response)
+    assert client.like_status("v1") is None
+
+
+def test_like_status_errors_map_to_service_error() -> None:
+    client, _ = make(get_watch_playlist=KeyError("contents"))
+    with pytest.raises(ServiceError):
+        client.like_status("v1")

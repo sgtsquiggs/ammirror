@@ -142,6 +142,9 @@ pinned match is used on the next sync.
   un-likes: songs you un-favorite on Apple Music stay liked on YouTube Music.
   It keeps remembering which likes it added, so switching back to `likes = true`
   un-likes the ones that are no longer favorites on the next sync.
+- YouTube Music sometimes silently drops likes when many are sent at once.
+  After liking, ammirror checks that they stuck and reports any that didn't;
+  running `ammirror sync` again re-likes them.
 - Track order within a playlist is not mirrored.
 - Removing a playlist from `config.toml` stops syncing it but leaves the copy on
   YouTube Music in place. ammirror remembers the copy, so adding the playlist

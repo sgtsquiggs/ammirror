@@ -10,6 +10,9 @@ class FakeYtm:
     search_results: dict[str, list[YtmCandidate]] = field(default_factory=dict)
     playlists: dict[str, YtmPlaylist] = field(default_factory=dict)
     liked: set[str] = field(default_factory=set)
+    drop_likes: set[str] = field(default_factory=set)  # like() is accepted but doesn't stick
+    hidden_likes: set[str] = field(default_factory=set)  # liked, but missing from the list
+    unknown_status: set[str] = field(default_factory=set)  # like_status returns None
     fail_on: set[str] = field(default_factory=set)
     auth_fail_on: set[str] = field(default_factory=set)
     calls: list[tuple] = field(default_factory=list)
@@ -57,11 +60,18 @@ class FakeYtm:
 
     def liked_video_ids(self) -> set[str]:
         self._record("liked_video_ids")
-        return set(self.liked)
+        return set(self.liked - self.hidden_likes)
 
     def like(self, video_id: str) -> None:
         self._record("like", video_id)
-        self.liked.add(video_id)
+        if video_id not in self.drop_likes:
+            self.liked.add(video_id)
+
+    def like_status(self, video_id: str) -> str | None:
+        self._record("like_status", video_id)
+        if video_id in self.unknown_status:
+            return None
+        return "LIKE" if video_id in self.liked else "INDIFFERENT"
 
     def unlike(self, video_id: str) -> None:
         self._record("unlike", video_id)

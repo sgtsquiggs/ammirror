@@ -1,5 +1,6 @@
 import logging
-from collections.abc import Iterable, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from ammirror.apple.client import AppleLibrary
@@ -30,6 +31,8 @@ from ammirror.state import State
 from ammirror.ytm.client import YtmClient
 
 log = logging.getLogger(__name__)
+
+LIKE_VERIFY_DELAY = 2.0  # seconds YouTube Music gets to settle before likes are re-read
 
 
 @dataclass(frozen=True)
@@ -325,6 +328,52 @@ def apply_plan(plan: Plan, ytm: YtmClient, state: State) -> ApplyResult:
     return result
 
 
+def _verify_likes(
+    plan: Plan,
+    result: ApplyResult,
+    favorites: Sequence[AppleTrack] | None,
+    ytm: YtmClient,
+    sleep: Callable[[float], None],
+) -> list[str]:
+    """Check that applied likes stuck; return an error per like YouTube Music dropped.
+
+    YouTube Music sometimes accepts a like during a fast burst and silently discards it.
+    The liked list can also be incomplete, so a like missing from it is confirmed with
+    its own like status before it counts as dropped.
+    """
+    failed = {id(op) for op, _ in result.failures}
+    applied = [op for op in plan.ops if isinstance(op, Like) and id(op) not in failed]
+    if not applied:
+        return []
+    log.info("verifying %d likes…", len(applied))
+    sleep(LIKE_VERIFY_DELAY)
+    try:
+        liked = ytm.liked_video_ids()
+    except ServiceError as e:
+        return [f"could not verify likes: {e}"]
+    by_key = {t.key: t for t in favorites or ()}
+    errors: list[str] = []
+    for op in applied:
+        if op.video_id in liked:
+            continue
+        try:
+            status = ytm.like_status(op.video_id)
+        except ServiceError as e:
+            return [*errors, f"could not verify likes: {e}"]
+        if status is None:
+            log.debug("like %s missing from liked list; status unknown, not flagged", op.video_id)
+        elif status != "LIKE":
+            log.debug("like %s dropped (status %s)", op.video_id, status)
+            t = by_key.get(op.apple_id)
+            label = f"{t.artist} - {t.title}" if t else op.apple_id
+            errors.append(
+                f"like didn't stick on YouTube Music: {label} ({op.video_id}); "
+                "run `ammirror sync` again"
+            )
+    log.info("verified: %d stuck, %d dropped", len(applied) - len(errors), len(errors))
+    return errors
+
+
 @dataclass
 class SyncReport:
     plan: Plan
@@ -342,6 +391,7 @@ def run_sync(
     *,
     dry_run: bool = False,
     retry_unmatched: bool = False,
+    sleep: Callable[[float], None] | None = None,
 ) -> SyncReport:
     warnings: list[str] = []
     errors: list[str] = []
@@ -407,6 +457,7 @@ def run_sync(
         log.info("dry run: not applying; %d unmatched", unmatched)
         return SyncReport(plan, None, warnings, unmatched, errors)
     result = apply_plan(plan, ytm, state)
+    errors += _verify_likes(plan, result, favorites, ytm, sleep or time.sleep)
     log.info(
         "done: applied %d, %d failed, %d unmatched", result.applied, len(result.failures), unmatched
     )
