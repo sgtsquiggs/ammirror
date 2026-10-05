@@ -18,7 +18,7 @@ jobs:
       - run: uv sync --locked
       # Runs the pre-commit hooks from prek.toml (ruff, pyright and file
       # hygiene) on all files.
-      - uses: j178/prek-action@v3
+      - uses: j178/prek-action@v3.0.0
       # Runs the commit-msg hook (commitlint) on each new commit.
       - name: Check commit messages
         env:
