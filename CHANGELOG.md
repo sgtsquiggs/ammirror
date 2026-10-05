@@ -31,3 +31,5 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   style.
 - Config keys `sync.playlists`, `sync.likes`, `sync.favorites_playlist`, and
   `sync.mirror_prefix`.
+
+[Unreleased]: https://github.com/sgtsquiggs/ammirror/commits/main

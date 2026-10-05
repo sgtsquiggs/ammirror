@@ -90,8 +90,7 @@ since the last release decide the next version, as in the table above.
 To release:
 
 1. Move the `Unreleased` entries in `CHANGELOG.md` under a new version heading
-   with today's date. Once the repository is published, also add or update the
-   comparison links at the bottom.
+   with today's date, and update the comparison links at the bottom.
 2. Bump the version in `pyproject.toml` with `uv version <x.y.z>`, which also
    updates `uv.lock`.
 3. Commit both with `chore(release): <version>`.
