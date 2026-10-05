@@ -124,7 +124,8 @@ caches the match results locally, so the next real sync does not search again.
 
 Exit codes: 0 on success; 1 if anything failed (a playlist was skipped, the
 favorites playlist couldn't be read, a search or operation failed, or a like
-didn't stick; all but the like check also apply to `--dry-run`); 2 for an
+didn't stick; with `--dry-run`, only skipped playlists, an unreadable
+favorites playlist, and failed searches apply); 2 for an
 authentication, configuration, or usage problem.
 
 ## Logging
