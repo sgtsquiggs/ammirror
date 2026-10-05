@@ -2,7 +2,8 @@
 #   prek install
 # Run every hook on every file:
 #   prek run --all-files
-# CI runs the same hooks with j178/prek-action.
+# CI runs the pre-commit hooks with j178/prek-action and the commit-msg hook with
+# .github/scripts/check-commit-messages.sh.
 
 minimum_prek_version = "0.4.0"
 default_install_hook_types = ["pre-commit", "commit-msg"]

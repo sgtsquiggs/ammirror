@@ -38,7 +38,8 @@ LIKE_VERIFY_DELAY = 2.0  # seconds YouTube Music gets to settle before likes are
 @dataclass(frozen=True)
 class AppleSnapshot:
     playlists: tuple[tuple[ApplePlaylist, tuple[AppleTrack, ...]], ...]
-    favorites: tuple[AppleTrack, ...] | None  # None when likes are disabled
+    # None when likes are off or favorites couldn't be read
+    favorites: tuple[AppleTrack, ...] | None
 
 
 @dataclass(frozen=True)
@@ -380,7 +381,8 @@ class SyncReport:
     result: ApplyResult | None
     warnings: list[str]  # informational; the run still succeeded
     unmatched: int
-    errors: list[str] = field(default_factory=list)  # skipped playlists, failed searches
+    # skipped playlists, favorites read, failed searches, dropped likes
+    errors: list[str] = field(default_factory=list)
 
 
 def run_sync(

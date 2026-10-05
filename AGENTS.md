@@ -10,12 +10,12 @@ for what the tool does and how it is installed.
 | `src/ammirror/cli.py` | The click commands and the `ammirror` console entry point. |
 | `src/ammirror/config.py` | Config and path dataclasses, TOML loading, and secret-file writing. |
 | `src/ammirror/errors.py` | The `AmmirrorError` hierarchy (`AuthError`, `ConfigError`, ...) mapped to exit codes by the CLI. |
-| `src/ammirror/models.py` | Frozen dataclasses for tracks, playlists, candidates, and match results. |
+| `src/ammirror/models.py` | Frozen dataclasses for tracks, playlists, candidates, match results, playlist mappings, sync ops and `Plan`, plus playlist-name normalization. |
 | `src/ammirror/state.py` | SQLite `State`: matches, unmatched tracks, playlist mappings, owned likes. |
 | `src/ammirror/apple/token.py` | Builds the Apple developer token (ES256 JWT) from the MusicKit key. |
 | `src/ammirror/apple/auth.py` | Local browser flow that obtains the Apple Music user token. |
 | `src/ammirror/apple/client.py` | `AppleClient`, the httpx-based Apple Music API reader. |
-| `src/ammirror/ytm/client.py` | `YtmusicapiClient`, the ytmusicapi wrapper for YouTube Music. |
+| `src/ammirror/ytm/client.py` | The `YtmClient` protocol, `YtmusicapiClient` (ytmusicapi wrapper with retries), and the pasted-header sanitizer for `auth ytm`. |
 | `src/ammirror/match.py` | Pure track-matching and scoring logic. |
 | `src/ammirror/sync.py` | Planning (`plan_sync`), applying, and `run_sync` orchestration. |
 | `tests/fakes.py` | In-memory `FakeApple` and `FakeYtm` for tests. |
@@ -43,8 +43,7 @@ for what the tool does and how it is installed.
   copy rather than creating a duplicate.
 - Tests never touch the network. Fixtures are synthetic, never real library
   data.
-- Secrets live in `~/.config/ammirror/` (0600) and never in the repo.
+- Secrets live in the config directory (`$XDG_CONFIG_HOME/ammirror`, default
+  `~/.config/ammirror/`; 0600) and never in the repo.
 - Commit messages follow `CONTRIBUTING.md`, checked by the prek commit-msg
   hook locally and in CI. Do not bypass hooks with `--no-verify`.
-- `docs/superpowers/` holds local design notes and is git-excluded; never
-  commit it.
