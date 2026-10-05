@@ -41,9 +41,10 @@ _BODY_HEADERS = frozenset({"content-encoding", "content-length"})
 def sanitize_ytm_headers_report(raw: str) -> tuple[str, list[str]]:
     """Drop pasted lines that describe the browser's own request, keep the rest verbatim.
 
-    Firefox's "Copy Request Headers" includes the HTTP request line, HTTP/2-3
-    pseudo-headers, and content-encoding/content-length of the browser's (gzipped)
-    body; ytmusicapi sends plain JSON, so these make YouTube answer HTTP 400.
+    A browser's copied request headers (e.g. Firefox's "Copy Request Headers")
+    include the HTTP request line, HTTP/2-3 pseudo-headers, and
+    content-encoding/content-length of the browser's (gzipped) body; ytmusicapi
+    sends plain JSON, so these make YouTube answer HTTP 400.
 
     Also returns the names of the dropped lines (never their values).
     """

@@ -5,7 +5,10 @@ Service = Literal["apple", "ytm"]
 _SERVICE_NAMES: dict[str, str] = {"apple": "Apple Music", "ytm": "YouTube Music"}
 
 # Appended to errors caused by YouTube Music responses ytmusicapi could not parse.
-YTMUSICAPI_HINT = "(ytmusicapi may need upgrading: `uv tool upgrade ammirror`)"
+YTMUSICAPI_HINT = (
+    "(ytmusicapi may need upgrading: upgrade ammirror, "
+    "e.g. `uv tool upgrade ammirror` or `pipx upgrade ammirror`)"
+)
 
 
 class AmmirrorError(Exception):

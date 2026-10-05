@@ -200,7 +200,7 @@ def test_sync_suggests_upgrade_once_on_ytmusicapi_parse_errors(
     result = CliRunner().invoke(cli, ["sync"])
     assert result.exit_code == 1
     last = result.output.strip().splitlines()[-1]
-    assert "uv tool upgrade ammirror" in last
+    assert "upgrade ammirror" in last
     assert sum("hint:" in line for line in result.output.splitlines()) == 1
 
 

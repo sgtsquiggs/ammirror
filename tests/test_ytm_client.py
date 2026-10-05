@@ -4,7 +4,7 @@ import pytest
 import requests
 from ytmusicapi.exceptions import YTMusicServerError, YTMusicUserError
 
-from ammirror.errors import AuthError, ServiceError
+from ammirror.errors import YTMUSICAPI_HINT, AuthError, ServiceError
 from ammirror.models import YtmCandidate, YtmPlaylist, YtmPlaylistItem
 from ammirror.ytm.client import YtmusicapiClient, sanitize_ytm_headers
 
@@ -79,7 +79,7 @@ def test_get_playlist_parse_error_on_existing_playlist_raises() -> None:
     )
     with pytest.raises(ServiceError, match="could not read") as info:
         client.get_playlist("PL1")
-    assert "uv tool upgrade ammirror" in str(info.value)
+    assert "upgrade ammirror" in str(info.value)
 
 
 @pytest.mark.parametrize(
@@ -90,7 +90,7 @@ def test_parse_errors_are_service_errors_with_upgrade_hint(exc: Exception) -> No
     with pytest.raises(ServiceError) as info:
         client.liked_video_ids()
     assert str(info.value).startswith("YouTube Music get_liked_songs failed:")
-    assert str(info.value).endswith("(ytmusicapi may need upgrading: `uv tool upgrade ammirror`)")
+    assert str(info.value).endswith(YTMUSICAPI_HINT)
 
 
 def test_server_401_is_auth_error() -> None:

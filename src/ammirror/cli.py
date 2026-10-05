@@ -126,8 +126,8 @@ _YTM_HELP = """\
 2. Open DevTools (F12) → Network, filter for "browse", and click around until a
    POST request to music.youtube.com/youtubei/v1/browse appears.
 3. Copy its request headers (Firefox: right-click → Copy Value → Copy Request Headers;
-   Chrome: Headers tab → Request Headers → select all and copy).
-4. Paste them here, then press Ctrl-D on an empty line.
+   Chrome or Edge: Headers tab → Request Headers → select all and copy).
+4. Paste them here, then press Ctrl-D (Ctrl-Z then Enter on Windows) on an empty line.
 """
 
 
@@ -232,7 +232,7 @@ def sync(ctx: click.Context, dry_run: bool, retry_unmatched: bool) -> None:
     if any(YTMUSICAPI_HINT in m for m in [*report.errors, *(err for _, err in failures)]):
         click.secho(
             "hint: some YouTube Music responses could not be parsed; "
-            "try `uv tool upgrade ammirror`",
+            "upgrade ammirror (e.g. `uv tool upgrade ammirror` or `pipx upgrade ammirror`)",
             fg="yellow",
             err=True,
         )
