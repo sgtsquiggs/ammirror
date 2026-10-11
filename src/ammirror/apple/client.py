@@ -18,6 +18,7 @@ _RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 
 class AppleLibrary(Protocol):
+    def check_auth(self) -> str: ...
     def library_playlists(self) -> list[ApplePlaylist]: ...
     def playlist_tracks(self, playlist_id: str) -> list[AppleTrack]: ...
     def favorite_songs(self, playlist_name: str) -> list[AppleTrack]: ...
@@ -129,6 +130,11 @@ class AppleClient:
             log.debug("%s page %d: %d items", url.path, page, len(items))
             yield from items
             next_path = body.get("next")
+
+    def check_auth(self) -> str:
+        data = self._get("/v1/me/storefront", {}).get("data") or []
+        storefront = data[0].get("id") if data and isinstance(data[0], dict) else None
+        return f"signed in (storefront {storefront})" if storefront else "signed in"
 
     def library_playlists(self) -> list[ApplePlaylist]:
         return [

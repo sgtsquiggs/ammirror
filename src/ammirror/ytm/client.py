@@ -19,6 +19,7 @@ DESCRIPTION = "Mirrored from Apple Music by ammirror"
 
 
 class YtmClient(Protocol):
+    def check_auth(self) -> str: ...
     def search_songs(self, query: str) -> list[YtmCandidate]: ...
     def get_playlist(self, playlist_id: str) -> YtmPlaylist | None: ...
     def create_playlist(self, title: str) -> str: ...
@@ -163,6 +164,20 @@ class YtmusicapiClient:
         result = self._call(name, *args, **kwargs)
         self._sleep(self._write_delay)
         return result
+
+    def check_auth(self) -> str:
+        """Confirm the session is signed in; describe the account.
+
+        Reads liked songs because a signed-out session fails there with a recognizable
+        sign-in page. Signed out, get_account_info fails like a parser break, and
+        get_library_playlists quietly returns nothing.
+        """
+        self._call("get_liked_songs", limit=1)
+        try:
+            name = (self._call("get_account_info") or {}).get("accountName")
+        except ServiceError:
+            name = None
+        return f"signed in as {name}" if name else "signed in"
 
     def search_songs(self, query: str) -> list[YtmCandidate]:
         results = self._call("search", query, filter="songs", limit=10) or []

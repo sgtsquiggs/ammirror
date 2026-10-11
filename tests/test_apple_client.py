@@ -137,6 +137,23 @@ def test_auth_failure(status: int) -> None:
         client(lambda _r: httpx.Response(status)).library_playlists()
 
 
+def test_check_auth_reads_storefront() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json={"data": [{"id": "us", "type": "storefronts"}]})
+
+    assert client(handler).check_auth() == "signed in (storefront us)"
+    assert seen == ["/v1/me/storefront"]
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_check_auth_failure(status: int) -> None:
+    with pytest.raises(AuthError):
+        client(lambda _r: httpx.Response(status)).check_auth()
+
+
 def test_retries_429_with_retry_after() -> None:
     calls = {"n": 0}
     sleeps: list[float] = []

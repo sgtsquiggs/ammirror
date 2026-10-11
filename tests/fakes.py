@@ -25,6 +25,10 @@ class FakeYtm:
         if name in self.auth_fail_on:
             raise AuthError("ytm")
 
+    def check_auth(self) -> str:
+        self._record("check_auth")
+        return "signed in"
+
     def search_songs(self, query: str) -> list[YtmCandidate]:
         self._record("search_songs", query)
         return self.search_results.get(query, [])
@@ -85,6 +89,12 @@ class FakeApple:
     failing_playlists: set[str] = field(default_factory=set)
     favorites_error: str | None = None
     favorites_requests: list[str] = field(default_factory=list)
+    check_error: Exception | None = None
+
+    def check_auth(self) -> str:
+        if self.check_error is not None:
+            raise self.check_error
+        return "signed in"
 
     def library_playlists(self) -> list[ApplePlaylist]:
         return [p for p, _ in self.playlists]

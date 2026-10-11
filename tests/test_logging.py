@@ -127,6 +127,7 @@ def test_sync_verbose_narrates_progress(fakes: tuple[FakeApple, FakeYtm]) -> Non
     result = CliRunner().invoke(cli, ["-v", "sync"])
     assert result.exit_code == 0, result.output
     err = result.stderr
+    assert f"{BULLET} Apple Music: signed in\n{BULLET} YouTube Music: signed in\n" in err
     assert f"{BULLET} Fetching 'Gym'… 2 tracks" in err
     assert "resolved 2 tracks: 0 cached, 0 pinned, 2 searched → 1 matched, 1 unmatched" in err
     assert "planned 1 ops" in err

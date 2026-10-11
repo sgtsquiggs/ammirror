@@ -1,9 +1,10 @@
 import logging
 import sys
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import version
-from typing import Any
+from typing import Any, Protocol
 
 import click
 import ytmusicapi
@@ -79,7 +80,11 @@ class _Group(click.Group):
             if isinstance(obj, CliContext) and obj.verbosity >= 2:
                 traceback.print_exc()
             click.echo(f"error: {e}", err=True)
-            ctx.exit(2 if isinstance(e, AuthError | ConfigError) else 1)
+            ctx.exit(_exit_code(e))
+
+
+def _exit_code(e: AmmirrorError) -> int:
+    return 2 if isinstance(e, AuthError | ConfigError) else 1
 
 
 def get_ctx(ctx: click.Context) -> CliContext:
@@ -167,6 +172,35 @@ def make_ytm(paths: Paths) -> YtmClient:
     return YtmusicapiClient.from_auth_file(paths.ytm_auth_file)
 
 
+class _AuthCheckable(Protocol):
+    def check_auth(self) -> str: ...
+
+
+def _checked[C: _AuthCheckable](
+    service: str, make: Callable[[], C], failures: list[AmmirrorError]
+) -> C | None:
+    try:
+        client = make()
+        log.info("%s: %s", service, client.check_auth())
+    except AmmirrorError as e:
+        log.debug("%s auth check failed", service, exc_info=True)
+        failures.append(e)
+        return None
+    return client
+
+
+def connect(ctx: click.Context, paths: Paths, cfg: Config) -> tuple[AppleLibrary, YtmClient]:
+    """Build both clients and check their auth, reporting every failure before exiting."""
+    failures: list[AmmirrorError] = []
+    apple = _checked("Apple Music", lambda: make_apple(paths, cfg), failures)
+    ytm = _checked("YouTube Music", lambda: make_ytm(paths), failures)
+    if apple is None or ytm is None:
+        for e in failures:
+            click.echo(f"error: {e}", err=True)
+        ctx.exit(max(map(_exit_code, failures)))
+    return apple, ytm
+
+
 @cli.command()
 @click.pass_context
 def playlists(ctx: click.Context) -> None:
@@ -205,8 +239,7 @@ def sync(ctx: click.Context, dry_run: bool, retry_unmatched: bool) -> None:
     """Mirror Apple Music into YouTube Music."""
     obj = get_ctx(ctx)
     cfg = obj.config()
-    apple = make_apple(obj.paths, cfg)
-    ytm = make_ytm(obj.paths)
+    apple, ytm = connect(ctx, obj.paths, cfg)
     state = State(obj.paths.state_db)
     try:
         report = run_sync(

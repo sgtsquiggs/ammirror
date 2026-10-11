@@ -113,6 +113,24 @@ def test_signed_out_playlist_read_is_auth_error_not_missing() -> None:
     assert [c[0] for c in yt.calls] == ["get_playlist"]
 
 
+def test_check_auth_reads_likes_and_names_the_account() -> None:
+    client, yt = make(get_liked_songs={"tracks": []}, get_account_info={"accountName": "Ann"})
+    assert client.check_auth() == "signed in as Ann"
+    assert yt.calls[0] == ("get_liked_songs", (), {"limit": 1})
+
+
+def test_check_auth_without_account_name() -> None:
+    client, _ = make(get_liked_songs={"tracks": []}, get_account_info=KeyError("header"))
+    assert client.check_auth() == "signed in"
+
+
+def test_check_auth_signed_out_is_auth_error() -> None:
+    client, yt = make(get_liked_songs=KeyError("... {'signInEndpoint': {}} ..."))
+    with pytest.raises(AuthError):
+        client.check_auth()
+    assert [c[0] for c in yt.calls] == ["get_liked_songs"]
+
+
 def test_server_401_is_auth_error() -> None:
     client, _ = make(get_liked_songs=YTMusicServerError("Server returned HTTP 401: Unauthorized."))
     with pytest.raises(AuthError):

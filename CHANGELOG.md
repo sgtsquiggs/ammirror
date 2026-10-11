@@ -11,6 +11,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `ammirror auth apple` signs in to Apple Music through a MusicKit browser flow;
   `ammirror auth ytm` saves YouTube Music credentials from pasted browser headers,
   sanitized before use.
+- `ammirror sync` checks Apple Music and YouTube Music sign-in before doing
+  anything else and stops with every auth problem reported; an expired YouTube
+  Music session is reported as such rather than as a parse error.
 - `ammirror playlists` lists Apple Music playlists, showing which are selected and
   mirrored.
 - `ammirror sync` mirrors playlists and likes, with `--dry-run` to preview and

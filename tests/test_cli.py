@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from ammirror.cli import cli
 from ammirror.config import Paths
-from ammirror.errors import YTMUSICAPI_HINT, ServiceError
+from ammirror.errors import YTMUSICAPI_HINT, AuthError, ServiceError
 from ammirror.match import search_query
 from ammirror.models import ApplePlaylist
 from ammirror.state import State
@@ -169,6 +169,44 @@ def test_sync_missing_ytm_auth_exits_2(paths: Paths, monkeypatch: pytest.MonkeyP
     assert "ammirror auth ytm" in result.output
 
 
+def test_sync_checks_both_services_before_doing_anything(
+    fakes: tuple[FakeApple, FakeYtm],
+) -> None:
+    apple, ytm = fakes
+    apple.check_error = AuthError("apple")
+    ytm.auth_fail_on = {"check_auth"}
+    result = CliRunner().invoke(cli, ["sync", "--dry-run"])
+    assert result.exit_code == 2
+    assert "error: Apple Music auth missing or expired" in result.stderr
+    assert "error: YouTube Music auth missing or expired" in result.stderr
+    assert ytm.calls == [("check_auth",)]
+    assert "dry run" not in result.output
+
+
+def test_sync_reports_every_missing_credential(paths: Paths) -> None:
+    write_config(paths)
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 2
+    assert "ammirror auth apple" in result.stderr
+    assert "ammirror auth ytm" in result.stderr
+
+
+def test_sync_check_service_error_exits_1(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    apple, ytm = fakes
+    apple.check_error = ServiceError("Apple Music request failed: timed out")
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 1
+    assert "error: Apple Music request failed: timed out" in result.stderr
+    assert ytm.calls == [("check_auth",)]
+
+
+def test_sync_check_auth_error_wins_exit_code(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    apple, ytm = fakes
+    apple.check_error = AuthError("apple")
+    ytm.fail_on = {"check_auth"}
+    assert CliRunner().invoke(cli, ["sync"]).exit_code == 2
+
+
 def test_sync_dry_run_with_skipped_playlist_exits_1(fakes: tuple[FakeApple, FakeYtm]) -> None:
     apple, _ = fakes
     apple.failing_playlists = {"p.gym"}
@@ -227,7 +265,12 @@ def test_sync_dry_run_only_reads_youtube_music(
     assert result.exit_code == 0, result.output
     assert "would like v1" in result.output
     assert "would unlike vOLD" in result.output
-    assert {c[0] for c in ytm.calls} <= {"search_songs", "get_playlist", "liked_video_ids"}
+    assert {c[0] for c in ytm.calls} <= {
+        "check_auth",
+        "search_songs",
+        "get_playlist",
+        "liked_video_ids",
+    }
     assert ytm.liked == {"vOLD"}
     assert ytm.playlists == {}
 

@@ -122,6 +122,10 @@ ammirror pin APPLE_ID VIDEO_ID    # match a track by hand
 `--dry-run` never changes YouTube Music, but it still searches for tracks and
 caches the match results locally, so the next real sync does not search again.
 
+`sync` first checks that it is signed in to both Apple Music and YouTube Music
+and stops before doing anything else if either check fails, reporting every
+failure at once.
+
 Exit codes: 0 on success; 1 if anything failed (a playlist was skipped, the
 favorites playlist couldn't be read, a search or operation failed, or a like
 didn't stick; with `--dry-run`, only skipped playlists, an unreadable
@@ -132,7 +136,8 @@ authentication, configuration, or usage problem.
 
 Logs go to stderr, so normal command output on stdout is unchanged.
 
-- `ammirror -v sync` (verbose) narrates progress: playlists found and fetched,
+- `ammirror -v sync` (verbose) narrates progress: the sign-in check for each
+  service, playlists found and fetched,
   a track-resolution summary, the number of planned operations, each operation as
   it's applied, and the like check.
 - `ammirror -vv sync` (debug) adds per-track match decisions and candidate scores,
