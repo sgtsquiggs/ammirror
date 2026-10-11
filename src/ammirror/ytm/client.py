@@ -150,6 +150,10 @@ class YtmusicapiClient:
         except (YTMusicError, requests.RequestException) as e:
             raise ServiceError(f"YouTube Music {name} failed: {e}") from e
         except (KeyError, IndexError, TypeError, ValueError) as e:
+            # An expired session gets HTTP 200 with a sign-in page instead of a 401;
+            # ytmusicapi's parse error embeds that response, sign-in button and all.
+            if "signInEndpoint" in str(e):
+                raise AuthError("ytm", "expired (YouTube Music answered as signed out)") from e
             # ytmusicapi scrapes YouTube Music's internal API; when the response shape
             # changes it fails with bare lookup/type errors until it is updated.
             detail = f"{type(e).__name__} {e}"

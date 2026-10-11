@@ -93,6 +93,26 @@ def test_parse_errors_are_service_errors_with_upgrade_hint(exc: Exception) -> No
     assert str(info.value).endswith(YTMUSICAPI_HINT)
 
 
+def test_signed_out_response_is_auth_error() -> None:
+    # An expired session gets HTTP 200 with a sign-in page, which ytmusicapi
+    # fails to parse; the KeyError message embeds that response.
+    signed_out = KeyError(
+        "Unable to find 'twoColumnBrowseResultsRenderer' using path [...] on "
+        "{'singleColumnBrowseResultsRenderer': {'button': {'buttonRenderer': "
+        "{'navigationEndpoint': {'signInEndpoint': {'hack': True}}}}}}"
+    )
+    client, _ = make(get_liked_songs=signed_out)
+    with pytest.raises(AuthError, match="signed out"):
+        client.liked_video_ids()
+
+
+def test_signed_out_playlist_read_is_auth_error_not_missing() -> None:
+    client, yt = make(get_playlist=KeyError("... {'signInEndpoint': {}} ..."))
+    with pytest.raises(AuthError):
+        client.get_playlist("PL1")
+    assert [c[0] for c in yt.calls] == ["get_playlist"]
+
+
 def test_server_401_is_auth_error() -> None:
     client, _ = make(get_liked_songs=YTMusicServerError("Server returned HTTP 401: Unauthorized."))
     with pytest.raises(AuthError):
