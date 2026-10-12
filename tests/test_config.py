@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ammirror.config import LikesMode, Paths, load_config, write_secret
+from ammirror.config import LikesMode, Paths, load_config, save_sync_playlists, write_secret
 from ammirror.errors import AuthError, ConfigError
 
 GOOD = """
@@ -130,3 +130,56 @@ def test_load_config_likes_modes(tmp_path: Path, value: str, mode: LikesMode) ->
     f = tmp_path / "config.toml"
     f.write_text(GOOD.replace("likes = false", f"likes = {value}"))
     assert load_config(f).sync.likes is mode
+
+
+COMMENTED = """\
+# my ammirror config
+[apple]
+key_path = "~/keys/AuthKey_ABC.p8"
+key_id = "ABCDE12345"
+team_id = "FGHIJ67890"
+
+[sync]
+# which playlists to mirror
+playlists = ["*"]
+likes = "add-only"  # never un-like
+"""
+
+
+def test_save_sync_playlists_keeps_comments_and_other_settings(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(COMMENTED)
+    path.chmod(0o600)
+    save_sync_playlists(path, ["Gym", "\u201893"])
+    text = path.read_text()
+    assert "# my ammirror config" in text
+    assert "# which playlists to mirror" in text
+    assert 'likes = "add-only"  # never un-like' in text
+    cfg = load_config(path)
+    assert cfg.sync.playlists == ("Gym", "\u201893")
+    assert cfg.sync.likes is LikesMode.ADD_ONLY
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_save_sync_playlists_creates_sync_table(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(COMMENTED.split("[sync]")[0])
+    save_sync_playlists(path, [])
+    assert load_config(path).sync.playlists == ()
+
+
+def test_save_sync_playlists_leaves_file_alone_when_result_is_invalid(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    broken = COMMENTED.replace('likes = "add-only"', 'likes = "sometimes"')
+    path.write_text(broken)
+    with pytest.raises(ConfigError, match=r"sync\.likes"):
+        save_sync_playlists(path, ["Gym"])
+    assert path.read_text() == broken
+    assert [p.name for p in tmp_path.iterdir()] == ["config.toml"]
+
+
+def test_save_sync_playlists_rejects_non_table_sync(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('sync = "nope"\n')
+    with pytest.raises(ConfigError, match=r"\[sync\] must be a table"):
+        save_sync_playlists(path, ["Gym"])

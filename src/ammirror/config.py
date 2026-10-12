@@ -1,10 +1,14 @@
 import os
+import tempfile
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+import tomlkit
+from tomlkit.exceptions import TOMLKitError
 
 from ammirror.errors import ConfigError
 
@@ -131,3 +135,32 @@ def write_secret(path: Path, text: str) -> None:
     with os.fdopen(fd, "w") as f:
         f.write(text)
     path.chmod(0o600)
+
+
+def save_sync_playlists(path: Path, names: Sequence[str]) -> None:
+    """Set sync.playlists in the config, keeping its comments, formatting and mode.
+
+    The new file is checked with load_config before it atomically replaces the old one.
+    """
+    try:
+        doc = tomlkit.parse(path.read_text())
+    except (OSError, UnicodeDecodeError, TOMLKitError) as e:
+        raise ConfigError(f"cannot read config {path}: {e}") from e
+    sync = doc.setdefault("sync", tomlkit.table())
+    if not isinstance(sync, dict):
+        raise ConfigError(f"{path}: [sync] must be a table")
+    playlists = tomlkit.array()
+    playlists.extend(names)
+    playlists.multiline(len(names) > 1)
+    sync["playlists"] = playlists
+
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(tomlkit.dumps(doc))
+        tmp.chmod(path.stat().st_mode & 0o777)
+        load_config(tmp)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)

@@ -15,7 +15,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   anything else and stops with every auth problem reported; an expired YouTube
   Music session is reported as such rather than as a parse error.
 - `ammirror playlists` lists Apple Music playlists, showing which are selected and
-  mirrored.
+  mirrored, grouped by owner (yours, Apple Music, other) in natural order;
+  `--edit` picks them in an interactive checklist and saves `sync.playlists`,
+  keeping the config's comments.
 - `ammirror sync` mirrors playlists and likes, with `--dry-run` to preview and
   `--retry-unmatched` to search again for tracks that failed to match.
 - Playlist mirrors are owned by ammirror and created private on YouTube Music; track

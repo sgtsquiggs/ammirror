@@ -13,10 +13,11 @@ from ytmusicapi.exceptions import YTMusicError
 from ammirror.apple.auth import run_auth_flow
 from ammirror.apple.client import AppleClient, AppleLibrary
 from ammirror.apple.token import load_developer_token
-from ammirror.config import Config, Paths, load_config, write_secret
+from ammirror.config import Config, Paths, load_config, save_sync_playlists, write_secret
 from ammirror.errors import YTMUSICAPI_HINT, AmmirrorError, AuthError, ConfigError
+from ammirror.picker import PickerRow, ask_playlists, build_rows, group_headings, playlist_changes
 from ammirror.state import State
-from ammirror.sync import describe, run_sync, select_playlists
+from ammirror.sync import describe, run_sync
 from ammirror.ytm.client import YtmClient, YtmusicapiClient, sanitize_ytm_headers_report
 
 log = logging.getLogger(__name__)
@@ -201,28 +202,58 @@ def connect(ctx: click.Context, paths: Paths, cfg: Config) -> tuple[AppleLibrary
     return apple, ytm
 
 
+def is_interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 @cli.command()
+@click.option(
+    "--edit",
+    is_flag=True,
+    help="Choose the playlists to mirror in an interactive checklist and save them "
+    "as sync.playlists in the config.",
+)
 @click.pass_context
-def playlists(ctx: click.Context) -> None:
+def playlists(ctx: click.Context, edit: bool) -> None:
     """List Apple Music playlists and which ones are mirrored."""
     obj = get_ctx(ctx)
     cfg = obj.config()
+    if edit and not is_interactive():
+        raise click.UsageError("--edit needs an interactive terminal")
     available = make_apple(obj.paths, cfg).library_playlists()
-    selected, _ = select_playlists(available, cfg.sync.playlists)
-    selected_ids = {p.id for p in selected}
     state = State(obj.paths.state_db)
     try:
         mirrored = state.playlist_mappings()
     finally:
         state.close()
-    for p in available:
-        flags = []
-        if p.id in selected_ids:
-            flags.append("selected")
-        if p.id in mirrored:
-            flags.append("mirrored")
-        suffix = f"  [{', '.join(flags)}]" if flags else ""
-        click.echo(f"{p.name}{suffix}")
+    rows = build_rows(available, cfg.sync.playlists, mirrored, cfg.sync.favorites_playlist)
+    if edit:
+        _edit_playlists(ctx, obj.paths, rows)
+        return
+    headings = group_headings(rows)
+    for i, r in enumerate(rows):
+        if i in headings:
+            click.echo(headings[i])
+        tags = ("selected", *r.tags) if r.checked else r.tags
+        click.echo(f"  {r.name}  [{', '.join(tags)}]" if tags else f"  {r.name}")
+
+
+def _edit_playlists(ctx: click.Context, paths: Paths, rows: list[PickerRow]) -> None:
+    checked = ask_playlists(rows)
+    if checked is None:
+        click.echo("cancelled; config unchanged", err=True)
+        ctx.exit(1)
+    changes = playlist_changes(rows, checked)
+    if not changes.changed:
+        click.echo("no changes")
+        return
+    save_sync_playlists(paths.config_file, changes.names)
+    if changes.added:
+        click.echo(f"added: {', '.join(changes.added)}")
+    if changes.removed:
+        click.echo(f"removed: {', '.join(changes.removed)}")
+        click.echo("removed playlists keep their YouTube Music copy")
+    click.echo(f"saved sync.playlists to {paths.config_file}")
 
 
 @cli.command()

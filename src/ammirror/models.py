@@ -1,3 +1,4 @@
+import re
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
@@ -18,6 +19,17 @@ def normalize_playlist_name(name: str) -> str:
     return " ".join(folded.split()).casefold()
 
 
+_LEADING_PUNCTUATION = re.compile(r"^[\W_]+")
+_DIGITS = re.compile(r"[0-9]+")
+
+
+def natural_sort_key(name: str) -> tuple[str, str, str]:
+    """Sort key: numbers by value, case and quote style ignored, leading punctuation skipped."""
+    folded = normalize_playlist_name(name)
+    core = _LEADING_PUNCTUATION.sub("", folded)
+    return _DIGITS.sub(lambda m: m.group().zfill(20), core), folded, name
+
+
 @dataclass(frozen=True)
 class AppleTrack:
     library_id: str
@@ -34,10 +46,19 @@ class AppleTrack:
         return self.catalog_id or self.library_id
 
 
+class PlaylistOwner(StrEnum):
+    """Who manages a library playlist, in the order playlists are listed."""
+
+    YOURS = "yours"  # editable: made by the user
+    APPLE = "apple"  # read-only, from Apple Music's catalog
+    OTHER = "other"  # read-only system playlists such as Favorite Songs
+
+
 @dataclass(frozen=True)
 class ApplePlaylist:
     id: str
     name: str
+    owner: PlaylistOwner = PlaylistOwner.YOURS
 
 
 @dataclass(frozen=True)

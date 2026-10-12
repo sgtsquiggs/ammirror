@@ -112,6 +112,7 @@ which would otherwise make YouTube reject every call.
 
 ```sh
 ammirror playlists          # list Apple Music playlists; shows which are selected and mirrored
+ammirror playlists --edit   # pick the playlists to mirror in a checklist; saves sync.playlists
 ammirror sync --dry-run     # print what would change; never changes YouTube Music
 ammirror sync               # mirror playlists and likes
 ammirror sync --retry-unmatched   # also search again for tracks that failed to match
@@ -121,6 +122,20 @@ ammirror pin APPLE_ID VIDEO_ID    # match a track by hand
 
 `--dry-run` never changes YouTube Music, but it still searches for tracks and
 caches the match results locally, so the next real sync does not search again.
+
+`playlists` and `playlists --edit` group playlists by owner: yours (ones you
+can edit), Apple Music's (added from its catalog), and other system playlists
+such as Favorite Songs. Within each group names sort naturally (`Mix 2` before
+`Mix 10`; case, quote style, and leading punctuation ignored). Same-named
+playlists share one entry, since the config selects playlists by name.
+
+`playlists --edit` opens a checklist of your Apple Music playlists (type to
+filter, space to toggle, Enter to save, Ctrl-C to cancel) and writes the checked
+names to `sync.playlists`, keeping the rest of the config and its comments. It
+always saves explicit names, so a `["*"]` config becomes a list and new playlists
+are no longer picked up automatically. Configured names that match no playlist
+are shown as `not in Apple Music`; uncheck them to drop them. Unchecked
+playlists keep their YouTube Music copy.
 
 `sync` first checks that it is signed in to both Apple Music and YouTube Music
 and stops before doing anything else if either check fails, reporting every

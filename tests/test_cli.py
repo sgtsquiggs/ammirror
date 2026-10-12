@@ -8,10 +8,11 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from ammirror.cli import cli
-from ammirror.config import Paths
+from ammirror.config import Paths, load_config
 from ammirror.errors import YTMUSICAPI_HINT, AuthError, ServiceError
 from ammirror.match import search_query
-from ammirror.models import ApplePlaylist
+from ammirror.models import ApplePlaylist, PlaylistOwner
+from ammirror.picker import PickerRow
 from ammirror.state import State
 from tests.factories import cand, track
 from tests.fakes import FakeApple, FakeYtm
@@ -111,6 +112,32 @@ def fakes(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> tuple[FakeApple, Fak
     return apple, ytm
 
 
+def test_playlists_lists_by_owner(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_config(paths, '[sync]\nplaylists = ["Mix 2", "Gone"]\n')
+    apple = FakeApple(
+        playlists=[
+            (ApplePlaylist("a1", "Ambient Essentials", PlaylistOwner.APPLE), []),
+            (ApplePlaylist("y1", "Mix 10"), []),
+            (ApplePlaylist("y2", "Mix 2"), []),
+            (ApplePlaylist("s1", "Favorite Songs", PlaylistOwner.OTHER), []),
+        ]
+    )
+    monkeypatch.setattr("ammirror.cli.make_apple", lambda _p, _c: apple)
+    result = CliRunner().invoke(cli, ["playlists"])
+    assert result.exit_code == 0, result.output
+    assert result.output == (
+        "Not in Apple Music (1)\n"
+        "  Gone  [selected]\n"
+        "Yours (2)\n"
+        "  Mix 2  [selected]\n"
+        "  Mix 10\n"
+        "Apple Music (1)\n"
+        "  Ambient Essentials\n"
+        "Other (1)\n"
+        "  Favorite Songs  [favorites]\n"
+    )
+
+
 @pytest.mark.usefixtures("fakes")
 def test_playlists_marks_selected_and_mirrored() -> None:
     out = CliRunner().invoke(cli, ["playlists"]).output
@@ -119,6 +146,77 @@ def test_playlists_marks_selected_and_mirrored() -> None:
     out = CliRunner().invoke(cli, ["playlists"]).output
     gym_line = next(line for line in out.splitlines() if "Gym" in line)
     assert "mirrored" in gym_line
+
+
+class FakePicker:
+    def __init__(self) -> None:
+        self.answer: list[str] | None = None
+        self.shown: list[list[PickerRow]] = []
+
+    def __call__(self, rows: list[PickerRow]) -> list[str] | None:
+        self.shown.append(rows)
+        return self.answer
+
+
+@pytest.fixture
+def picker(monkeypatch: pytest.MonkeyPatch) -> FakePicker:
+    fake = FakePicker()
+    monkeypatch.setattr("ammirror.cli.is_interactive", lambda: True)
+    monkeypatch.setattr("ammirror.cli.ask_playlists", fake)
+    return fake
+
+
+@pytest.mark.usefixtures("fakes")
+def test_playlists_edit_saves_selection(paths: Paths, picker: FakePicker) -> None:
+    picker.answer = ["Other"]
+    result = CliRunner().invoke(cli, ["playlists", "--edit"])
+    assert result.exit_code == 0, result.output
+    assert picker.shown[0] == [PickerRow("Gym", True, ()), PickerRow("Other", False, ())]
+    assert load_config(paths.config_file).sync.playlists == ("Other",)
+    assert "added: Other" in result.output
+    assert "removed: Gym" in result.output
+    assert "keep their YouTube Music copy" in result.output
+    assert f"saved sync.playlists to {paths.config_file}" in result.output
+
+
+@pytest.mark.usefixtures("fakes")
+def test_playlists_edit_can_drop_missing_names(paths: Paths, picker: FakePicker) -> None:
+    write_config(paths, '[sync]\nplaylists = ["Gym", "Gone"]\nlikes = false\n')
+    picker.answer = ["Gym"]
+    result = CliRunner().invoke(cli, ["playlists", "--edit"])
+    assert result.exit_code == 0, result.output
+    assert picker.shown[0][0] == PickerRow("Gone", True, (), None)
+    assert load_config(paths.config_file).sync.playlists == ("Gym",)
+    assert "removed: Gone" in result.output
+
+
+@pytest.mark.usefixtures("fakes")
+def test_playlists_edit_without_changes_leaves_config(paths: Paths, picker: FakePicker) -> None:
+    before = paths.config_file.read_text()
+    picker.answer = ["Gym"]
+    result = CliRunner().invoke(cli, ["playlists", "--edit"])
+    assert result.exit_code == 0, result.output
+    assert "no changes" in result.output
+    assert paths.config_file.read_text() == before
+
+
+@pytest.mark.usefixtures("fakes")
+def test_playlists_edit_cancel_leaves_config(paths: Paths, picker: FakePicker) -> None:
+    before = paths.config_file.read_text()
+    picker.answer = None
+    result = CliRunner().invoke(cli, ["playlists", "--edit"])
+    assert result.exit_code == 1
+    assert "cancelled; config unchanged" in result.output
+    assert paths.config_file.read_text() == before
+
+
+@pytest.mark.usefixtures("fakes")
+def test_playlists_edit_needs_a_terminal(paths: Paths) -> None:
+    before = paths.config_file.read_text()
+    result = CliRunner().invoke(cli, ["playlists", "--edit"])
+    assert result.exit_code == 2
+    assert "needs an interactive terminal" in result.output
+    assert paths.config_file.read_text() == before
 
 
 def test_sync_dry_run_prints_plan(fakes: tuple[FakeApple, FakeYtm]) -> None:

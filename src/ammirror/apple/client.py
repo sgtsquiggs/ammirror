@@ -8,7 +8,7 @@ import httpx
 from ammirror.apple.token import load_developer_token
 from ammirror.config import Config, Paths
 from ammirror.errors import AuthError, ServiceError
-from ammirror.models import ApplePlaylist, AppleTrack, normalize_playlist_name
+from ammirror.models import ApplePlaylist, AppleTrack, PlaylistOwner, normalize_playlist_name
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +42,17 @@ def _parse_track(item: dict[str, Any]) -> AppleTrack | None:
         duration_ms=cattrs.get("durationInMillis") or attrs.get("durationInMillis"),
         isrc=cattrs.get("isrc"),
     )
+
+
+def _parse_playlist(item: dict[str, Any]) -> ApplePlaylist:
+    attrs = item.get("attributes") or {}
+    if attrs.get("canEdit"):
+        owner = PlaylistOwner.YOURS
+    elif attrs.get("hasCatalog"):
+        owner = PlaylistOwner.APPLE
+    else:
+        owner = PlaylistOwner.OTHER
+    return ApplePlaylist(item["id"], attrs.get("name") or "", owner)
 
 
 class AppleClient:
@@ -138,7 +149,7 @@ class AppleClient:
 
     def library_playlists(self) -> list[ApplePlaylist]:
         return [
-            ApplePlaylist(item["id"], (item.get("attributes") or {}).get("name", ""))
+            _parse_playlist(item)
             for item in self._paginate("/v1/me/library/playlists", {"limit": str(PAGE_LIMIT)})
             if item.get("id")
         ]

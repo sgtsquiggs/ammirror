@@ -5,7 +5,7 @@ import pytest
 
 from ammirror.apple.client import AppleClient
 from ammirror.errors import AuthError, ServiceError
-from ammirror.models import ApplePlaylist, AppleTrack
+from ammirror.models import ApplePlaylist, AppleTrack, PlaylistOwner
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -66,7 +66,23 @@ def test_sends_auth_headers_and_lists_playlists() -> None:
         )
 
     result = client(handler).library_playlists()
-    assert result == [ApplePlaylist("p.1", "A"), ApplePlaylist("p.2", "B")]
+    assert [(p.id, p.name) for p in result] == [("p.1", "A"), ("p.2", "B")]
+
+
+@pytest.mark.parametrize(
+    ("attrs", "owner"),
+    [
+        ({"canEdit": True, "hasCatalog": False}, PlaylistOwner.YOURS),
+        ({"canEdit": True, "hasCatalog": True}, PlaylistOwner.YOURS),
+        ({"canEdit": False, "hasCatalog": True}, PlaylistOwner.APPLE),
+        ({"canEdit": False, "hasCatalog": False}, PlaylistOwner.OTHER),
+        ({}, PlaylistOwner.OTHER),
+    ],
+)
+def test_library_playlists_owner(attrs: dict, owner: PlaylistOwner) -> None:
+    body = {"data": [{"id": "p.1", "attributes": {"name": "A", **attrs}}]}
+    result = client(lambda _r: httpx.Response(200, json=body)).library_playlists()
+    assert result == [ApplePlaylist("p.1", "A", owner)]
 
 
 def test_pagination_keeps_original_params() -> None:
@@ -212,6 +228,6 @@ def test_items_without_id_are_skipped() -> None:
         return httpx.Response(200, json={"data": [no_id, bad_catalog, lib_song(3), None]})
 
     c = client(handler)
-    assert c.library_playlists() == [ApplePlaylist("p.1", "")]
+    assert c.library_playlists() == [ApplePlaylist("p.1", "", PlaylistOwner.OTHER)]
     tracks = c.playlist_tracks("p.1")
     assert [(t.library_id, t.catalog_id) for t in tracks] == [("i.2", None), ("i.3", "300")]

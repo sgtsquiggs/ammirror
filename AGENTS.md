@@ -8,14 +8,15 @@ for what the tool does and how it is installed.
 | Path | What it is |
 |---|---|
 | `src/ammirror/cli.py` | The click commands and the `ammirror` console entry point. |
-| `src/ammirror/config.py` | Config and path dataclasses, TOML loading, and secret-file writing. |
+| `src/ammirror/config.py` | Config and path dataclasses, TOML loading, saving `sync.playlists` (comment-preserving), and secret-file writing. |
 | `src/ammirror/errors.py` | The `AmmirrorError` hierarchy (`AuthError`, `ConfigError`, ...) mapped to exit codes by the CLI. |
-| `src/ammirror/models.py` | Frozen dataclasses for tracks, playlists, candidates, match results, playlist mappings, sync ops and `Plan`, plus playlist-name normalization. |
+| `src/ammirror/models.py` | Frozen dataclasses for tracks, playlists, candidates, match results, playlist mappings, sync ops and `Plan`, plus playlist-name normalization and natural sorting. |
 | `src/ammirror/state.py` | SQLite `State`: matches, unmatched tracks, playlist mappings, owned likes. |
 | `src/ammirror/apple/token.py` | Builds the Apple developer token (ES256 JWT) from the MusicKit key. |
 | `src/ammirror/apple/auth.py` | Local browser flow that obtains the Apple Music user token. |
 | `src/ammirror/apple/client.py` | `AppleClient`, the httpx-based Apple Music API reader. |
 | `src/ammirror/ytm/client.py` | The `YtmClient` protocol, `YtmusicapiClient` (ytmusicapi wrapper with retries), and the pasted-header sanitizer for `auth ytm`. |
+| `src/ammirror/picker.py` | The `playlists --edit` checklist: pure row building and change summary, plus the questionary prompt. |
 | `src/ammirror/match.py` | Pure track-matching and scoring logic. |
 | `src/ammirror/sync.py` | Planning (`plan_sync`), applying, and `run_sync` orchestration. |
 | `tests/fakes.py` | In-memory `FakeApple` and `FakeYtm` for tests. |
@@ -34,7 +35,8 @@ for what the tool does and how it is installed.
 - Python >=3.12, managed with uv. Checks: `uv run pytest`, and
   `prek run --all-files` (ruff, pyright, hygiene).
 - Layering: only `apple/client.py` imports httpx among source modules (tests may import it); only `ytm/client.py` and the
-  `auth ytm` command import ytmusicapi. `match.py` and `sync.plan_sync` are
+  `auth ytm` command import ytmusicapi; only `picker.py` imports questionary; only
+  `config.py` imports tomlkit. `match.py` and `sync.plan_sync` are
   pure; keep I/O out of them.
 - Log with `logging.getLogger(__name__)`: INFO is progress, DEBUG is per-item
   detail. Never log secrets (tokens, header values, key material).
