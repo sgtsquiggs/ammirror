@@ -70,6 +70,9 @@ likes = true
 favorites_playlist = "Favorite Songs"
 # Text prepended to the name of each mirrored playlist on YouTube Music.
 mirror_prefix = ""
+# Give mirrors of Apple Music-managed playlists their Apple artwork as a cover.
+# Your own playlists keep YouTube Music's cover. Default: true.
+covers = true
 ```
 
 ## Signing in
@@ -196,6 +199,16 @@ pinned match is used on the next sync.
   name plus `mirror_prefix`, so a manual rename on YouTube Music is reverted and
   changing the prefix renames all mirrors.
 - Track order within a playlist is not mirrored.
+- With `covers = true`, the mirror of an Apple Music-managed playlist (the
+  "Apple Music" group in `ammirror playlists`) gets its artwork as a cover when
+  the mirror is created, and again whenever the artwork changes. A cover you set
+  by hand on YouTube Music stays until the Apple artwork changes. Mirrors of your
+  own playlists, and of system playlists like Favorite Songs, are left with
+  whatever cover YouTube Music gives them. YouTube Music only allows
+  custom covers on phone-verified Google accounts, and ammirror sets them through
+  an undocumented part of the web app, so covers can stop working without notice.
+  A cover that can't be set is a warning, never a failed sync; after YouTube
+  Music refuses one, ammirror skips the rest until the next sync.
 - Removing a playlist from `config.toml` stops syncing it but leaves the copy on
   YouTube Music in place. ammirror remembers the copy, so adding the playlist
   back later resumes syncing into it instead of creating a new one.

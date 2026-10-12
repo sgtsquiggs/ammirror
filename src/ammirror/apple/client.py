@@ -14,6 +14,8 @@ log = logging.getLogger(__name__)
 
 API = "https://api.music.apple.com"
 PAGE_LIMIT = 100
+ARTWORK_SIZE = 1200  # px; Apple's playlist artwork is at most this, and square
+ARTWORK_MAX_BYTES = 10 * 1024 * 1024
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 
@@ -22,6 +24,7 @@ class AppleLibrary(Protocol):
     def library_playlists(self) -> list[ApplePlaylist]: ...
     def playlist_tracks(self, playlist_id: str) -> list[AppleTrack]: ...
     def favorite_songs(self, playlist_name: str) -> list[AppleTrack]: ...
+    def artwork(self, url: str) -> bytes: ...
 
 
 def _parse_track(item: dict[str, Any]) -> AppleTrack | None:
@@ -44,6 +47,17 @@ def _parse_track(item: dict[str, Any]) -> AppleTrack | None:
     )
 
 
+def _artwork_url(artwork: Any) -> str | None:
+    """Fill in Apple's {w}x{h} artwork URL template with a square size."""
+    if not isinstance(artwork, dict) or not isinstance(url := artwork.get("url"), str) or not url:
+        return None
+    sizes = [
+        n for n in (artwork.get("width"), artwork.get("height")) if isinstance(n, int) and n > 0
+    ]
+    size = str(min([*sizes, ARTWORK_SIZE]))
+    return url.replace("{w}", size).replace("{h}", size)
+
+
 def _parse_playlist(item: dict[str, Any]) -> ApplePlaylist:
     attrs = item.get("attributes") or {}
     if attrs.get("canEdit"):
@@ -52,7 +66,9 @@ def _parse_playlist(item: dict[str, Any]) -> ApplePlaylist:
         owner = PlaylistOwner.APPLE
     else:
         owner = PlaylistOwner.OTHER
-    return ApplePlaylist(item["id"], attrs.get("name") or "", owner)
+    return ApplePlaylist(
+        item["id"], attrs.get("name") or "", owner, _artwork_url(attrs.get("artwork"))
+    )
 
 
 class AppleClient:
@@ -71,6 +87,8 @@ class AppleClient:
             timeout=30.0,
             headers={"Authorization": f"Bearer {developer_token}", "Music-User-Token": user_token},
         )
+        # Artwork lives on Apple's CDNs; this client never carries the API tokens.
+        self._images = httpx.Client(transport=transport, timeout=30.0, follow_redirects=True)
         self._sleep = sleep
         self._max_retries = max_retries
 
@@ -83,6 +101,7 @@ class AppleClient:
 
     def close(self) -> None:
         self._http.close()
+        self._images.close()
 
     def _get(
         self, path: str, params: dict[str, str], *, missing_ok: bool = False
@@ -176,3 +195,17 @@ class AppleClient:
             f"no Apple Music playlist named '{playlist_name}' for favorites;"
             " set sync.favorites_playlist"
         )
+
+    def artwork(self, url: str) -> bytes:
+        log.debug("GET artwork %s", httpx.URL(url).host)
+        try:
+            resp = self._images.get(url)
+        except httpx.TransportError as e:
+            raise ServiceError(f"Apple Music artwork download failed: {e}") from e
+        if resp.is_error:
+            raise ServiceError(f"Apple Music artwork download returned {resp.status_code}")
+        if not resp.headers.get("content-type", "").startswith("image/"):
+            raise ServiceError("Apple Music artwork download did not return an image")
+        if len(resp.content) > ARTWORK_MAX_BYTES:
+            raise ServiceError(f"Apple Music artwork is too large ({len(resp.content)} bytes)")
+        return resp.content

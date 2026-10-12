@@ -68,6 +68,7 @@ class SyncConfig:
     likes: LikesMode = LikesMode.MIRROR
     mirror_prefix: str = ""
     favorites_playlist: str = "Favorite Songs"
+    covers: bool = True
 
 
 @dataclass(frozen=True)
@@ -125,8 +126,13 @@ def load_config(path: Path) -> Config:
     favorites_playlist = sync.get("favorites_playlist", "Favorite Songs")
     if not isinstance(favorites_playlist, str) or not favorites_playlist:
         raise ConfigError("sync.favorites_playlist must be a non-empty string")
+    covers = sync.get("covers", True)
+    if not isinstance(covers, bool):
+        raise ConfigError("sync.covers must be true or false")
 
-    return Config(apple_cfg, SyncConfig(tuple(playlists), likes, prefix, favorites_playlist))
+    return Config(
+        apple_cfg, SyncConfig(tuple(playlists), likes, prefix, favorites_playlist, covers)
+    )
 
 
 def write_secret(path: Path, text: str) -> None:

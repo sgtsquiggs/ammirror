@@ -57,6 +57,13 @@ def test_load_config_sync_defaults(tmp_path: Path) -> None:
     assert cfg.sync.likes is LikesMode.MIRROR
     assert cfg.sync.mirror_prefix == ""
     assert cfg.sync.favorites_playlist == "Favorite Songs"
+    assert cfg.sync.covers is True
+
+
+def test_load_config_covers_off(tmp_path: Path) -> None:
+    f = tmp_path / "config.toml"
+    f.write_text(GOOD + "covers = false\n")
+    assert load_config(f).sync.covers is False
 
 
 def test_load_config_missing_file(tmp_path: Path) -> None:
@@ -84,6 +91,7 @@ def test_load_config_missing_file(tmp_path: Path) -> None:
         (GOOD.replace('["Gym", "Chill"]', '"Gym"'), "playlists"),
         (GOOD.replace('"Lieblingssongs"', '""'), "favorites_playlist"),
         (GOOD.replace('"Lieblingssongs"', "3"), "favorites_playlist"),
+        (GOOD + 'covers = "yes"\n', "sync.covers must be true or false"),
     ],
 )
 def test_load_config_invalid(tmp_path: Path, text: str, msg: str) -> None:

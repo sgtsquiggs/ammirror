@@ -1,3 +1,4 @@
+import sqlite3
 import stat
 from pathlib import Path
 
@@ -73,6 +74,37 @@ def test_playlist_mappings(state: State) -> None:
         "p.1": PlaylistMapping("p.1", "PLx", "Gym 2"),
         "p.2": PlaylistMapping("p.2", "PLy", "Chill"),
     }
+
+
+def test_cover_survives_rename_but_not_a_new_copy(state: State) -> None:
+    state.put_playlist("p.1", "PLx", "Gym")
+    state.put_playlist_cover("p.1", "art-1")
+    state.put_playlist("p.1", "PLx", "Lifting")
+    assert state.playlist_mappings()["p.1"] == PlaylistMapping("p.1", "PLx", "Lifting", "art-1")
+    state.put_playlist("p.1", "PLnew", "Lifting")
+    assert state.playlist_mappings()["p.1"].cover_key is None
+
+
+def test_migrates_version_1_database(tmp_path: Path) -> None:
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE matches (apple_id TEXT PRIMARY KEY, video_id TEXT NOT NULL,"
+        " score REAL NOT NULL, method TEXT NOT NULL, updated_at TEXT NOT NULL);"
+        "CREATE TABLE unmatched (apple_id TEXT PRIMARY KEY);"
+        "CREATE TABLE playlists (apple_playlist_id TEXT PRIMARY KEY,"
+        " ytm_playlist_id TEXT NOT NULL, apple_name TEXT NOT NULL, updated_at TEXT NOT NULL);"
+        "CREATE TABLE owned_likes (video_id TEXT PRIMARY KEY, apple_id TEXT NOT NULL,"
+        " created_at TEXT NOT NULL);"
+        "INSERT INTO playlists VALUES ('p.1', 'PLx', 'Gym', '2026-01-01T00:00:00+00:00');"
+        "PRAGMA user_version = 1;"
+    )
+    conn.close()
+    s = State(db)
+    assert s.playlist_mappings() == {"p.1": PlaylistMapping("p.1", "PLx", "Gym", None)}
+    s.put_playlist_cover("p.1", "art-1")
+    s.close()
+    assert State(db).playlist_mappings()["p.1"].cover_key == "art-1"
 
 
 def test_owned_likes(state: State) -> None:

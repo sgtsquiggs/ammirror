@@ -231,3 +231,71 @@ def test_items_without_id_are_skipped() -> None:
     assert c.library_playlists() == [ApplePlaylist("p.1", "", PlaylistOwner.OTHER)]
     tracks = c.playlist_tracks("p.1")
     assert [(t.library_id, t.catalog_id) for t in tracks] == [("i.2", None), ("i.3", "300")]
+
+
+@pytest.mark.parametrize(
+    ("artwork", "url"),
+    [
+        (
+            {"url": "https://img.example/a/{w}x{h}bb.jpg", "width": 1200, "height": 1200},
+            "https://img.example/a/1200x1200bb.jpg",
+        ),
+        (
+            {"url": "https://img.example/a/{w}x{h}cc.jpg", "width": 1080, "height": 1080},
+            "https://img.example/a/1080x1080cc.jpg",
+        ),
+        ({"url": "https://img.example/a/{w}x{h}bb.jpg"}, "https://img.example/a/1200x1200bb.jpg"),
+        (
+            {"url": "https://img.example/a/{w}x{h}bb.jpg", "width": 3000, "height": 3000},
+            "https://img.example/a/1200x1200bb.jpg",
+        ),
+        (
+            {"url": "https://img.example/a/1200x1200AM.jpg?t=x", "width": 1200, "height": 1200},
+            "https://img.example/a/1200x1200AM.jpg?t=x",
+        ),
+        ({"url": ""}, None),
+        ("not a dict", None),
+    ],
+)
+def test_library_playlists_artwork(artwork: object, url: str | None) -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        item = {"id": "p.1", "attributes": {"name": "A", "canEdit": True, "artwork": artwork}}
+        return httpx.Response(200, json={"data": [item]})
+
+    assert client(handler).library_playlists()[0].artwork_url == url
+
+
+def test_artwork_download_never_sends_apple_tokens() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url == "https://img.example/a/1200x1200bb.jpg"
+        assert "authorization" not in req.headers
+        assert "music-user-token" not in req.headers
+        return httpx.Response(200, content=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"})
+
+    assert client(handler).artwork("https://img.example/a/1200x1200bb.jpg") == b"\xff\xd8jpeg"
+
+
+@pytest.mark.parametrize(
+    ("response", "msg"),
+    [
+        (httpx.Response(404), "returned 404"),
+        (httpx.Response(200, text="<html>", headers={"content-type": "text/html"}), "not .*image"),
+        (
+            httpx.Response(
+                200, content=b"x" * (10 * 1024 * 1024 + 1), headers={"content-type": "image/jpeg"}
+            ),
+            "too large",
+        ),
+    ],
+)
+def test_artwork_download_errors(response: httpx.Response, msg: str) -> None:
+    with pytest.raises(ServiceError, match=msg):
+        client(lambda _req: response).artwork("https://img.example/a.jpg")
+
+
+def test_artwork_transport_error_is_a_service_error() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom", request=req)
+
+    with pytest.raises(ServiceError, match="artwork download failed"):
+        client(handler).artwork("https://img.example/a.jpg")

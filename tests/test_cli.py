@@ -236,6 +236,31 @@ def test_sync_applies_and_reports(fakes: tuple[FakeApple, FakeYtm]) -> None:
     assert "applied 1" in result.output
 
 
+def with_artwork(apple: FakeApple) -> None:
+    (gym, tracks), *rest = apple.playlists
+    art = "https://img.example/gym/1200x1200bb.jpg"
+    apple.playlists = [(ApplePlaylist(gym.id, gym.name, PlaylistOwner.APPLE, art), tracks), *rest]
+
+
+def test_sync_dry_run_lists_covers_without_downloading(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    apple, ytm = fakes
+    with_artwork(apple)
+    result = CliRunner().invoke(cli, ["sync", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "would set the cover of 'Gym' to its Apple Music artwork" in result.output
+    assert apple.artwork_requests == [] and ytm.covers == {}
+
+
+def test_sync_refused_cover_warns_and_exits_0(fakes: tuple[FakeApple, FakeYtm]) -> None:
+    apple, ytm = fakes
+    with_artwork(apple)
+    ytm.fail_on = {"set_playlist_cover"}
+    result = CliRunner().invoke(cli, ["sync"])
+    assert result.exit_code == 0, result.output
+    assert "warning: cover of 'Gym' not set: fake failure in set_playlist_cover" in result.output
+    assert "applied 1, 0 failed" in result.output
+
+
 def test_sync_partial_failure_exits_1(fakes: tuple[FakeApple, FakeYtm]) -> None:
     _, ytm = fakes
     ytm.fail_on = {"create_playlist"}

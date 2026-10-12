@@ -16,6 +16,7 @@ class FakeYtm:
     fail_on: set[str] = field(default_factory=set)
     auth_fail_on: set[str] = field(default_factory=set)
     calls: list[tuple] = field(default_factory=list)
+    covers: dict[str, bytes] = field(default_factory=dict)
     _next_id: int = 0
 
     def _record(self, name: str, *args: object) -> None:
@@ -62,6 +63,10 @@ class FakeYtm:
         kept = tuple(i for i in p.items if i.set_video_id not in gone)
         self.playlists[playlist_id] = YtmPlaylist(p.id, p.title, kept)
 
+    def set_playlist_cover(self, playlist_id: str, image: bytes) -> None:
+        self._record("set_playlist_cover", playlist_id, image)
+        self.covers[playlist_id] = image
+
     def liked_video_ids(self) -> set[str]:
         self._record("liked_video_ids")
         return set(self.liked - self.hidden_likes)
@@ -90,6 +95,8 @@ class FakeApple:
     favorites_error: str | None = None
     favorites_requests: list[str] = field(default_factory=list)
     check_error: Exception | None = None
+    failing_artwork: set[str] = field(default_factory=set)
+    artwork_requests: list[str] = field(default_factory=list)
 
     def check_auth(self) -> str:
         if self.check_error is not None:
@@ -109,3 +116,9 @@ class FakeApple:
         if self.favorites_error is not None:
             raise ServiceError(self.favorites_error)
         return list(self.favorites)
+
+    def artwork(self, url: str) -> bytes:
+        self.artwork_requests.append(url)
+        if url in self.failing_artwork:
+            raise ServiceError(f"fake artwork failure for {url}")
+        return f"image of {url}".encode()

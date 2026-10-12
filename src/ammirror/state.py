@@ -51,6 +51,8 @@ CREATE TABLE owned_likes (
 );
 """
 
+_SCHEMA_V2 = "ALTER TABLE playlists ADD COLUMN cover_key TEXT;"
+
 # Artists are stored joined with this separator; it never appears in names.
 _ARTIST_SEP = "\x1f"
 
@@ -85,6 +87,10 @@ class State:
         if version == 0:
             log.debug("state: applying schema migration to version 1")
             self._db.executescript("BEGIN;" + _SCHEMA_V1 + "PRAGMA user_version = 1; COMMIT;")
+            version = 1
+        if version == 1:
+            log.debug("state: applying schema migration to version 2")
+            self._db.executescript("BEGIN;" + _SCHEMA_V2 + "PRAGMA user_version = 2; COMMIT;")
 
     def close(self) -> None:
         self._db.close()
@@ -165,14 +171,26 @@ class State:
 
     def playlist_mappings(self) -> dict[str, PlaylistMapping]:
         rows = self._db.execute(
-            "SELECT apple_playlist_id, ytm_playlist_id, apple_name FROM playlists"
+            "SELECT apple_playlist_id, ytm_playlist_id, apple_name, cover_key FROM playlists"
         ).fetchall()
         return {r[0]: PlaylistMapping(*r) for r in rows}
 
     def put_playlist(self, apple_playlist_id: str, ytm_playlist_id: str, apple_name: str) -> None:
+        """Record a mapping; its cover is kept unless the mapping now points at a new copy."""
         self._db.execute(
-            "INSERT OR REPLACE INTO playlists VALUES (?, ?, ?, ?)",
+            "INSERT INTO playlists (apple_playlist_id, ytm_playlist_id, apple_name, updated_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(apple_playlist_id) DO UPDATE SET "
+            "cover_key = CASE WHEN ytm_playlist_id = excluded.ytm_playlist_id "
+            "THEN cover_key END, "
+            "ytm_playlist_id = excluded.ytm_playlist_id, apple_name = excluded.apple_name, "
+            "updated_at = excluded.updated_at",
             (apple_playlist_id, ytm_playlist_id, apple_name, _now()),
+        )
+
+    def put_playlist_cover(self, apple_playlist_id: str, cover_key: str) -> None:
+        self._db.execute(
+            "UPDATE playlists SET cover_key = ?, updated_at = ? WHERE apple_playlist_id = ?",
+            (cover_key, _now(), apple_playlist_id),
         )
 
     # likes

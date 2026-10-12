@@ -1,3 +1,5 @@
+import pytest
+
 from ammirror.models import (
     AddItems,
     ApplePlaylist,
@@ -7,9 +9,11 @@ from ammirror.models import (
     Matched,
     Plan,
     PlaylistMapping,
+    PlaylistOwner,
     RemoveItems,
     RenamePlaylist,
     Resolution,
+    SetCover,
     Unlike,
     Unmatched,
     UnmatchedReason,
@@ -40,6 +44,7 @@ def plan(
     res: dict[str, Resolution] | None = None,
     prefix: str = "",
     remove_likes: bool = True,
+    covers: bool = False,
 ) -> Plan:
     return plan_sync(
         apple,
@@ -49,6 +54,7 @@ def plan(
         owned or {},
         prefix=prefix,
         remove_likes=remove_likes,
+        covers=covers,
     )
 
 
@@ -264,3 +270,65 @@ def test_describe() -> None:
     assert describe(uk) == "unlike v1"
     fl = ForgetLike("v1")
     assert describe(fl) == "forget like v1 (already removed on YouTube Music)"
+
+
+ART = "https://img.example/gym/1200x1200bb.jpg"
+ARTFUL_GYM = ApplePlaylist("p.gym", "Gym", PlaylistOwner.APPLE, ART)
+
+
+def test_new_mirror_gets_its_cover_after_creation() -> None:
+    p = plan(AppleSnapshot(((ARTFUL_GYM, (T1,)),), None), YtmSnapshot({}, frozenset()), covers=True)
+    assert p.ops == (
+        CreatePlaylist("p.gym", "Gym", "Gym", ("v1",)),
+        SetCover("p.gym", "Gym", ART),
+    )
+
+
+def test_cover_is_set_once_per_artwork() -> None:
+    apple = AppleSnapshot(((ARTFUL_GYM, (T1,)),), None)
+    ytm = YtmSnapshot({"PL": YtmPlaylist("PL", "AM: Gym", (item("v1"),))}, frozenset())
+
+    def ops_with(cover_key: str | None) -> tuple:
+        mappings = {"p.gym": PlaylistMapping("p.gym", "PL", "Gym", cover_key)}
+        return plan(apple, ytm, mappings, prefix="AM: ", covers=True).ops
+
+    assert ops_with(None) == (SetCover("p.gym", "AM: Gym", ART),)
+    assert ops_with("https://img.example/gym/old.jpg") == (SetCover("p.gym", "AM: Gym", ART),)
+    assert ops_with(ART) == ()
+
+
+def test_signed_artwork_url_counts_as_unchanged() -> None:
+    signed = "https://blob.example/gym/image?X-Amz-Date=20260102T000000Z&X-Amz-Signature=new"
+    gym = ApplePlaylist("p.gym", "Gym", PlaylistOwner.APPLE, signed)
+    ytm = YtmSnapshot({"PL": YtmPlaylist("PL", "Gym", (item("v1"),))}, frozenset())
+    mappings = {"p.gym": PlaylistMapping("p.gym", "PL", "Gym", "https://blob.example/gym/image")}
+    p = plan(AppleSnapshot(((gym, (T1,)),), None), ytm, mappings, covers=True)
+    assert p.ops == ()
+
+
+def test_no_cover_without_artwork_or_when_covers_are_off() -> None:
+    ytm = YtmSnapshot({}, frozenset())
+    bare = plan(AppleSnapshot(((GYM, (T1,)),), None), ytm, covers=True)
+    off = plan(AppleSnapshot(((ARTFUL_GYM, (T1,)),), None), ytm, covers=False)
+    assert not any(isinstance(op, SetCover) for op in bare.ops + off.ops)
+
+
+@pytest.mark.parametrize("owner", [PlaylistOwner.YOURS, PlaylistOwner.OTHER])
+def test_only_apple_music_playlists_get_covers(owner: PlaylistOwner) -> None:
+    mine = ApplePlaylist("p.gym", "Gym", owner, ART)
+    ytm = YtmSnapshot({"PL": YtmPlaylist("PL", "Gym", (item("v1"),))}, frozenset())
+    created = plan(AppleSnapshot(((mine, (T1,)),), None), YtmSnapshot({}, frozenset()), covers=True)
+    mirrored = plan(
+        AppleSnapshot(((mine, (T1,)),), None),
+        ytm,
+        {"p.gym": PlaylistMapping("p.gym", "PL", "Gym")},
+        covers=True,
+    )
+    assert created.ops == (CreatePlaylist("p.gym", "Gym", "Gym", ("v1",)),)
+    assert mirrored.ops == ()
+
+
+def test_describe_set_cover() -> None:
+    assert describe(SetCover("p.gym", "Gym", ART)) == (
+        "set the cover of 'Gym' to its Apple Music artwork"
+    )

@@ -22,6 +22,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `--retry-unmatched` to search again for tracks that failed to match.
 - Playlist mirrors are owned by ammirror and created private on YouTube Music; track
   order is not mirrored.
+- Mirrors of Apple Music-managed playlists get the playlist's artwork as a cover,
+  set again when the artwork changes; `sync.covers = false` turns this off.
 - Favorite Songs become likes on YouTube Music: `sync.likes` is `true` (mirror),
   `"add-only"` (never un-like), or `false` (leave likes alone).
 - After a sync that liked songs, ammirror checks that the likes stuck and reports any

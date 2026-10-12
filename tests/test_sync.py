@@ -14,7 +14,9 @@ from ammirror.models import (
     Like,
     Matched,
     Plan,
+    PlaylistOwner,
     RenamePlaylist,
+    SetCover,
     Unlike,
     Unmatched,
     UnmatchedReason,
@@ -130,7 +132,9 @@ def test_resolve_search_failure_is_an_error(state: State) -> None:
 
 def test_apply_create_records_mapping_and_adds(state: State) -> None:
     ytm = FakeYtm()
-    result = apply_plan(Plan((CreatePlaylist("p.gym", "Gym", "Gym", ("v1", "v2")),)), ytm, state)
+    result = apply_plan(
+        Plan((CreatePlaylist("p.gym", "Gym", "Gym", ("v1", "v2")),)), ytm, state, FakeApple()
+    )
     assert result.applied == 1 and result.failures == []
     pid = state.playlist_mappings()["p.gym"].ytm_playlist_id
     assert [i.video_id for i in ytm.playlists[pid].items] == ["v1", "v2"]
@@ -138,7 +142,7 @@ def test_apply_create_records_mapping_and_adds(state: State) -> None:
 
 def test_apply_like_records_ownership(state: State) -> None:
     ytm = FakeYtm()
-    apply_plan(Plan((Like("v1", "1"),)), ytm, state)
+    apply_plan(Plan((Like("v1", "1"),)), ytm, state, FakeApple())
     assert ytm.liked == {"v1"}
     assert state.owned_likes() == {"v1": "1"}
 
@@ -147,7 +151,7 @@ def test_apply_failure_continues(state: State) -> None:
     ytm = FakeYtm(fail_on={"add_items"})
     ytm.playlists["PL"] = YtmPlaylist("PL", "Gym", ())
     plan = Plan((AddItems("PL", "Gym", ("v1",)), Like("v2", "2")))
-    result = apply_plan(plan, ytm, state)
+    result = apply_plan(plan, ytm, state, FakeApple())
     assert result.applied == 1
     assert len(result.failures) == 1
     assert ytm.liked == {"v2"}
@@ -158,7 +162,7 @@ def test_apply_rename_updates_title_and_mapping(state: State) -> None:
     ytm.playlists["PL"] = YtmPlaylist("PL", "Gym", ())
     state.put_playlist("p.gym", "PL", "Gym")
     result = apply_plan(
-        Plan((RenamePlaylist("p.gym", "PL", "Lifting", "AM: Lifting"),)), ytm, state
+        Plan((RenamePlaylist("p.gym", "PL", "Lifting", "AM: Lifting"),)), ytm, state, FakeApple()
     )
     assert result.applied == 1 and result.failures == []
     assert ytm.playlists["PL"].title == "AM: Lifting"
@@ -168,7 +172,7 @@ def test_apply_rename_updates_title_and_mapping(state: State) -> None:
 def test_apply_unlike_drops_ownership(state: State) -> None:
     ytm = FakeYtm(liked={"v1", "v2"})
     state.add_owned_like("v1", "1")
-    result = apply_plan(Plan((Unlike("v1"),)), ytm, state)
+    result = apply_plan(Plan((Unlike("v1"),)), ytm, state, FakeApple())
     assert result.applied == 1
     assert ytm.liked == {"v2"}
     assert state.owned_likes() == {}
@@ -177,7 +181,7 @@ def test_apply_unlike_drops_ownership(state: State) -> None:
 def test_apply_forget_like_touches_only_state(state: State) -> None:
     ytm = FakeYtm()
     state.add_owned_like("v1", "1")
-    result = apply_plan(Plan((ForgetLike("v1"),)), ytm, state)
+    result = apply_plan(Plan((ForgetLike("v1"),)), ytm, state, FakeApple())
     assert result.applied == 1
     assert ytm.calls == []
     assert state.owned_likes() == {}
@@ -188,7 +192,7 @@ def test_apply_auth_error_aborts_instead_of_collecting(state: State) -> None:
     ytm.playlists["PL"] = YtmPlaylist("PL", "Gym", (YtmPlaylistItem("v9", "set-v9"),))
     plan = Plan((AddItems("PL", "Gym", ("v1",)), Like("v2", "2")))
     with pytest.raises(AuthError):
-        apply_plan(plan, ytm, state)
+        apply_plan(plan, ytm, state, FakeApple())
     assert ytm.liked == set()
     assert state.owned_likes() == {}
 
@@ -470,3 +474,103 @@ def test_verify_likes_skipped_when_likes_off_or_like_failed(state: State) -> Non
     assert sleeps == []
     assert report.result is not None and len(report.result.failures) == 3
     assert report.errors == []
+
+
+ART = "https://img.example/gym/1200x1200bb.jpg"
+
+
+def test_apply_set_cover_uploads_artwork_and_records_it(state: State) -> None:
+    ytm = FakeYtm()
+    plan = Plan((CreatePlaylist("p.gym", "Gym", "Gym", ()), SetCover("p.gym", "Gym", ART)))
+    result = apply_plan(plan, ytm, state, FakeApple())
+    assert result.applied == 2 and result.failures == [] and result.warnings == []
+    mapping = state.playlist_mappings()["p.gym"]
+    assert ytm.covers == {mapping.ytm_playlist_id: f"image of {ART}".encode()}
+    assert mapping.cover_key == ART
+
+
+def test_cover_download_failure_is_a_warning_and_other_covers_proceed(state: State) -> None:
+    state.put_playlist("p.gym", "PL1", "Gym")
+    state.put_playlist("p.run", "PL2", "Run")
+    apple = FakeApple(failing_artwork={"https://img.example/gym.jpg"})
+    ytm = FakeYtm()
+    plan = Plan(
+        (
+            SetCover("p.gym", "Gym", "https://img.example/gym.jpg"),
+            SetCover("p.run", "Run", "https://img.example/run.jpg"),
+        )
+    )
+    result = apply_plan(plan, ytm, state, apple)
+    assert result.failures == []
+    assert result.warnings == [
+        "cover of 'Gym' not set: fake artwork failure for https://img.example/gym.jpg"
+    ]
+    assert list(ytm.covers) == ["PL2"]
+    assert state.playlist_mappings()["p.gym"].cover_key is None
+
+
+def test_refused_cover_skips_the_remaining_covers_but_not_other_ops(state: State) -> None:
+    for n in range(3):
+        state.put_playlist(f"p.{n}", f"PL{n}", f"List {n}")
+    ytm = FakeYtm(fail_on={"set_playlist_cover"})
+    plan = Plan(
+        (
+            *(SetCover(f"p.{n}", f"List {n}", f"https://img.example/{n}.jpg") for n in range(3)),
+            Like("v1", "1"),
+        )
+    )
+    result = apply_plan(plan, ytm, state, FakeApple())
+    assert result.applied == 1 and result.failures == []
+    assert result.warnings == [
+        "cover of 'List 0' not set: fake failure in set_playlist_cover",
+        "skipped 2 more covers after YouTube Music refused one;"
+        " set sync.covers = false to stop trying",
+    ]
+    assert [c[0] for c in ytm.calls] == ["set_playlist_cover", "like"]
+
+
+def test_cover_for_a_playlist_that_was_not_created_is_a_warning(state: State) -> None:
+    ytm = FakeYtm(fail_on={"create_playlist"})
+    plan = Plan((CreatePlaylist("p.gym", "Gym", "Gym", ()), SetCover("p.gym", "Gym", ART)))
+    result = apply_plan(plan, ytm, state, FakeApple())
+    assert len(result.failures) == 1
+    assert result.warnings == ["cover of 'Gym' not set: the playlist has no YouTube Music copy"]
+
+
+def test_run_sync_sets_covers_once(state: State) -> None:
+    t1 = track(1)
+    gym = ApplePlaylist("p.gym", "Gym", PlaylistOwner.APPLE, ART)
+    apple = FakeApple(playlists=[(gym, [t1])])
+    ytm = ytm_for(t1)
+    cfg = SyncConfig(likes=LikesMode.OFF)
+
+    report = run_sync(cfg, apple, ytm, state)
+    assert report.result is not None and report.result.failures == []
+    assert report.warnings == []
+    assert list(ytm.covers.values()) == [f"image of {ART}".encode()]
+
+    assert run_sync(cfg, apple, ytm, state).plan.ops == ()
+
+    new_art = "https://img.example/gym/new/1200x1200bb.jpg"
+    apple.playlists = [(ApplePlaylist("p.gym", "Gym", PlaylistOwner.APPLE, new_art), [t1])]
+    assert run_sync(cfg, apple, ytm, state).plan.ops == (SetCover("p.gym", "Gym", new_art),)
+    assert list(ytm.covers.values()) == [f"image of {new_art}".encode()]
+
+
+def test_run_sync_cover_warnings_do_not_make_errors(state: State) -> None:
+    t1 = track(1)
+    apple = FakeApple(playlists=[(ApplePlaylist("p.gym", "Gym", PlaylistOwner.APPLE, ART), [t1])])
+    ytm = ytm_for(t1)
+    ytm.fail_on = {"set_playlist_cover"}
+    report = run_sync(SyncConfig(likes=LikesMode.OFF), apple, ytm, state)
+    assert report.errors == []
+    assert report.result is not None and report.result.failures == []
+    assert report.warnings == ["cover of 'Gym' not set: fake failure in set_playlist_cover"]
+
+
+def test_run_sync_without_covers_leaves_them_alone(state: State) -> None:
+    t1 = track(1)
+    apple = FakeApple(playlists=[(ApplePlaylist("p.gym", "Gym", PlaylistOwner.APPLE, ART), [t1])])
+    ytm = ytm_for(t1)
+    run_sync(SyncConfig(likes=LikesMode.OFF, covers=False), apple, ytm, state)
+    assert ytm.covers == {} and apple.artwork_requests == []

@@ -18,13 +18,16 @@ from ammirror.models import (
     Op,
     Plan,
     PlaylistMapping,
+    PlaylistOwner,
     RemoveItems,
     RenamePlaylist,
     Resolution,
+    SetCover,
     Unlike,
     Unmatched,
     UnmatchedReason,
     YtmPlaylist,
+    artwork_key,
     normalize_playlist_name,
 )
 from ammirror.state import State
@@ -92,11 +95,16 @@ def plan_sync(
     *,
     prefix: str = "",
     remove_likes: bool = True,
+    covers: bool = False,
 ) -> Plan:
     """Plan the ops that bring YouTube Music in line with the Apple snapshot.
 
     With remove_likes False (add-only likes) no Unlike is planned; owned likes of
     unfavorited songs stay liked and owned.
+
+    With covers, an Apple Music-managed playlist's artwork is set as its mirror's
+    cover when the mirror is created and whenever the artwork changes. Playlists of
+    your own keep whatever cover YouTube Music gives them.
 
     Mappings for playlists not in the snapshot (unselected, or skipped this run) are
     left alone, so a playlist selected again later reuses its existing mirror.
@@ -106,6 +114,7 @@ def plan_sync(
 
     for playlist, tracks in apple.playlists:
         title = prefix + playlist.name
+        art = playlist.artwork_url if covers and playlist.owner is PlaylistOwner.APPLE else None
         desired = _video_ids(tracks, resolutions)
         mapping = mappings.get(playlist.id)
         current = ytm.playlists[mapping.ytm_playlist_id] if mapping else None
@@ -119,6 +128,8 @@ def plan_sync(
                 "mirror gone, recreate" if mapping else "no mirror yet, create",
             )
             ops.append(CreatePlaylist(playlist.id, playlist.name, title, desired))
+            if art:
+                ops.append(SetCover(playlist.id, title, art))
             continue
         if current.title != title:
             ops.append(RenamePlaylist(playlist.id, current.id, playlist.name, title))
@@ -142,6 +153,8 @@ def plan_sync(
             warnings.append(f"'{playlist.name}' returned no tracks from Apple; skipping removals")
         elif removes:
             ops.append(RemoveItems(current.id, title, removes))
+        if art and mapping and artwork_key(art) != mapping.cover_key:
+            ops.append(SetCover(playlist.id, title, art))
 
     if apple.favorites is not None:
         favorites: dict[str, str] = {}
@@ -201,6 +214,8 @@ def describe(op: Op) -> str:
             return f"add {_tracks(len(ids))} to '{title}'"
         case RemoveItems(title=title, items=items):
             return f"remove {_tracks(len(items))} from '{title}'"
+        case SetCover(title=title):
+            return f"set the cover of '{title}' to its Apple Music artwork"
         case Like(video_id=vid):
             return f"like {vid}"
         case Unlike(video_id=vid):
@@ -285,9 +300,14 @@ def resolve_tracks(
 class ApplyResult:
     applied: int = 0
     failures: list[tuple[Op, str]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)  # covers that weren't set
 
 
-def _apply_one(op: Op, ytm: YtmClient, state: State) -> None:
+class _CoverRefused(ServiceError):
+    """YouTube Music would not take a cover; the next one would likely fare the same."""
+
+
+def _apply_one(op: Op, apple: AppleLibrary, ytm: YtmClient, state: State) -> None:
     match op:
         case CreatePlaylist(apple_playlist_id=aid, apple_name=name, title=title, video_ids=ids):
             pid = ytm.create_playlist(title)
@@ -303,6 +323,16 @@ def _apply_one(op: Op, ytm: YtmClient, state: State) -> None:
             ytm.add_items(pid, ids)
         case RemoveItems(ytm_playlist_id=pid, items=items):
             ytm.remove_items(pid, items)
+        case SetCover(apple_playlist_id=aid, artwork_url=url):
+            mapping = state.playlist_mappings().get(aid)
+            if mapping is None:
+                raise ServiceError("the playlist has no YouTube Music copy")
+            image = apple.artwork(url)
+            try:
+                ytm.set_playlist_cover(mapping.ytm_playlist_id, image)
+            except ServiceError as e:
+                raise _CoverRefused(str(e)) from e
+            state.put_playlist_cover(aid, artwork_key(url))
         case Like(video_id=vid, apple_id=aid):
             ytm.like(vid)
             state.add_owned_like(vid, aid)
@@ -313,19 +343,37 @@ def _apply_one(op: Op, ytm: YtmClient, state: State) -> None:
             state.remove_owned_like(vid)
 
 
-def apply_plan(plan: Plan, ytm: YtmClient, state: State) -> ApplyResult:
-    """Apply ops in order. Auth errors abort; other service errors are collected."""
+def apply_plan(plan: Plan, ytm: YtmClient, state: State, apple: AppleLibrary) -> ApplyResult:
+    """Apply ops in order. Auth errors abort; other service errors are collected.
+
+    Covers are cosmetic, so a cover that isn't set is a warning, not a failure. Once
+    YouTube Music refuses one, the remaining covers are skipped for this run.
+    """
     result = ApplyResult()
+    covers_refused = False
+    skipped_covers = 0
     for op in plan.ops:
+        if isinstance(op, SetCover) and covers_refused:
+            skipped_covers += 1
+            continue
         log.info("→ %s", describe(op))
         try:
-            _apply_one(op, ytm, state)
+            _apply_one(op, apple, ytm, state)
         except ServiceError as e:
             # INFO, not WARNING: the CLI already prints every failure to the user.
             log.info("  failed: %s", e)
-            result.failures.append((op, str(e)))
+            if isinstance(op, SetCover):
+                result.warnings.append(f"cover of '{op.title}' not set: {e}")
+                covers_refused = covers_refused or isinstance(e, _CoverRefused)
+            else:
+                result.failures.append((op, str(e)))
             continue
         result.applied += 1
+    if skipped_covers:
+        result.warnings.append(
+            f"skipped {skipped_covers} more cover{'s' if skipped_covers != 1 else ''}"
+            " after YouTube Music refused one; set sync.covers = false to stop trying"
+        )
     return result
 
 
@@ -451,6 +499,7 @@ def run_sync(
         state.owned_likes(),
         prefix=cfg.mirror_prefix,
         remove_likes=likes is not LikesMode.ADD_ONLY,
+        covers=cfg.covers,
     )
     warnings += plan.warnings
     unmatched = sum(isinstance(r, Unmatched) for r in resolutions.values())
@@ -458,7 +507,8 @@ def run_sync(
     if dry_run:
         log.info("dry run: not applying; %d unmatched", unmatched)
         return SyncReport(plan, None, warnings, unmatched, errors)
-    result = apply_plan(plan, ytm, state)
+    result = apply_plan(plan, ytm, state, apple)
+    warnings += result.warnings
     errors += _verify_likes(plan, result, favorites, ytm, sleep or time.sleep)
     log.info(
         "done: applied %d, %d failed, %d unmatched", result.applied, len(result.failures), unmatched

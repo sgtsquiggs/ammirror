@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import requests
+from requests.structures import CaseInsensitiveDict
 from ytmusicapi.exceptions import YTMusicError, YTMusicServerError, YTMusicUserError
 
 from ammirror.errors import YTMUSICAPI_HINT, AuthError, ServiceError
@@ -16,6 +17,10 @@ log = logging.getLogger(__name__)
 BATCH = 50
 RATE_LIMIT_RETRIES = 4  # backoff 1, 2, 4, 8 s
 DESCRIPTION = "Mirrored from Apple Music by ammirror"
+YTM_ORIGIN = "https://music.youtube.com"
+COVER_UPLOAD_URL = YTM_ORIGIN + "/playlist_image_upload/playlist_custom_thumbnail"
+# Session headers that describe ytmusicapi's JSON requests, not an image upload.
+_NOT_FOR_UPLOAD = ("content-type", "content-encoding", "content-length", "accept-encoding")
 
 
 class YtmClient(Protocol):
@@ -26,6 +31,7 @@ class YtmClient(Protocol):
     def rename_playlist(self, playlist_id: str, title: str) -> None: ...
     def add_items(self, playlist_id: str, video_ids: Sequence[str]) -> None: ...
     def remove_items(self, playlist_id: str, items: Sequence[YtmPlaylistItem]) -> None: ...
+    def set_playlist_cover(self, playlist_id: str, image: bytes) -> None: ...
     def liked_video_ids(self) -> set[str]: ...
     def like(self, video_id: str) -> None: ...
     def unlike(self, video_id: str) -> None: ...
@@ -230,6 +236,90 @@ class YtmusicapiClient:
             videos = [{"videoId": i.video_id, "setVideoId": i.set_video_id} for i in batch]
             result = self._write("remove_playlist_items", playlist_id, videos)
             _expect_succeeded("remove_playlist_items", result)
+
+    def set_playlist_cover(self, playlist_id: str, image: bytes) -> None:
+        """Make an image the playlist's custom cover.
+
+        ytmusicapi has no call for this (sigma67/ytmusicapi#711), so this replays YouTube
+        Music's web client: start a resumable upload, send the image, then point the
+        playlist at the uploaded blob.
+        """
+        start = self._upload(
+            COVER_UPLOAD_URL,
+            b"",
+            {
+                "X-Goog-Upload-Command": "start",
+                "X-Goog-Upload-Protocol": "resumable",
+                "X-Goog-Upload-Header-Content-Length": str(len(image)),
+            },
+        )
+        upload_url = start.headers.get("X-Goog-Upload-URL")
+        if not upload_url:
+            raise ServiceError("YouTube Music did not start the cover upload")
+        if not upload_url.startswith(YTM_ORIGIN + "/"):
+            # The next request carries the session's credentials; keep them on YouTube Music.
+            raise ServiceError("YouTube Music sent the cover upload to an unexpected host")
+        done = self._upload(
+            upload_url,
+            image,
+            {"X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "0"},
+        )
+        try:
+            blob_id = done.json().get("encryptedBlobId")
+        except (ValueError, AttributeError):
+            blob_id = None
+        if not isinstance(blob_id, str) or not blob_id:
+            raise ServiceError("YouTube Music cover upload returned no image id")
+        body = {
+            "playlistId": playlist_id.removeprefix("VL"),
+            "actions": [
+                {
+                    "action": "ACTION_SET_CUSTOM_THUMBNAIL",
+                    "addedCustomThumbnail": {
+                        "imageKey": {
+                            "type": "PLAYLIST_IMAGE_TYPE_CUSTOM_THUMBNAIL",
+                            "name": "studio_square_thumbnail",
+                        },
+                        "playlistScottyEncryptedBlobId": blob_id,
+                    },
+                }
+            ],
+        }
+        try:
+            result = self._write("_send_request", "browse/edit_playlist", body)
+        except AuthError as e:
+            # The session already passed the sign-in check, so a refusal here is about
+            # covers: YouTube Music only allows them on phone-verified accounts.
+            raise ServiceError(
+                "YouTube Music refused to set the cover (custom covers need a phone-verified"
+                " Google account)"
+            ) from e
+        _expect_succeeded("set cover", result)
+
+    def _upload(self, url: str, data: bytes, headers: dict[str, str]) -> requests.Response:
+        """POST to YouTube Music's upload endpoint with the signed-in session."""
+        yt = self._yt
+        sent = CaseInsensitiveDict(yt.headers)
+        for name in _NOT_FOR_UPLOAD:
+            sent.pop(name, None)
+        sent.update(
+            {
+                "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+                "Origin": YTM_ORIGIN,
+                **headers,
+            }
+        )
+        command = headers["X-Goog-Upload-Command"]
+        try:
+            resp = yt._session.post(
+                url, data=data, headers=sent, cookies=yt.cookies, proxies=yt.proxies
+            )
+        except requests.RequestException as e:
+            raise ServiceError(f"YouTube Music cover upload failed: {e}") from e
+        log.debug("ytm cover upload (%s) -> %d", command, resp.status_code)
+        if resp.status_code >= 400:
+            raise ServiceError(f"YouTube Music cover upload returned HTTP {resp.status_code}")
+        return resp
 
     def liked_video_ids(self) -> set[str]:
         data = self._call("get_liked_songs", limit=None) or {}

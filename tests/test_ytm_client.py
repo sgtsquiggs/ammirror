@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 import requests
+from requests.structures import CaseInsensitiveDict
 from ytmusicapi.exceptions import YTMusicServerError, YTMusicUserError
 
 from ammirror.errors import YTMUSICAPI_HINT, AuthError, ServiceError
@@ -333,3 +334,129 @@ def test_like_status_errors_map_to_service_error() -> None:
     client, _ = make(get_watch_playlist=KeyError("contents"))
     with pytest.raises(ServiceError):
         client.like_status("v1")
+
+
+class FakeResponse:
+    def __init__(self, status: int = 200, headers: dict | None = None, body: Any = None) -> None:
+        self.status_code = status
+        self.headers = CaseInsensitiveDict(headers or {})
+        self._body = body
+
+    def json(self) -> Any:
+        if self._body is None:
+            raise ValueError("no JSON")
+        return self._body
+
+
+class CoverYT:
+    """The slice of ytmusicapi's YTMusic that cover uploads use."""
+
+    def __init__(self, responses: list[FakeResponse | Exception], edit: Any = None) -> None:
+        self.headers = CaseInsensitiveDict(
+            {
+                "authorization": "SAPISIDHASH secret",
+                "content-type": "application/json",
+                "content-encoding": "gzip",
+                "accept-encoding": "gzip, br, zstd",
+                "origin": "https://music.youtube.com",
+                "x-goog-authuser": "0",
+            }
+        )
+        self.cookies = {"SOCS": "CAI"}
+        self.proxies = None
+        self.responses = responses
+        self.posts: list[tuple[str, bytes, dict]] = []
+        self.edit = {"status": "STATUS_SUCCEEDED"} if edit is None else edit
+        self.edits: list[tuple] = []
+        self._session = self
+
+    def post(self, url: str, *, data: bytes, headers: dict, cookies: dict, proxies: Any) -> Any:
+        assert cookies == self.cookies
+        self.posts.append((url, data, dict(headers)))
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    def _send_request(self, endpoint: str, body: dict) -> Any:
+        self.edits.append((endpoint, body))
+        if isinstance(self.edit, BaseException):
+            raise self.edit
+        return self.edit
+
+
+UPLOAD_URL = (
+    "https://music.youtube.com/playlist_image_upload/playlist_custom_thumbnail?upload_id=u1"
+)
+
+
+def cover_client(yt: CoverYT) -> YtmusicapiClient:
+    return YtmusicapiClient(yt, sleep=lambda _s: None)
+
+
+def started() -> FakeResponse:
+    return FakeResponse(headers={"X-Goog-Upload-URL": UPLOAD_URL})
+
+
+def test_set_playlist_cover_uploads_then_points_the_playlist_at_it() -> None:
+    yt = CoverYT([started(), FakeResponse(body={"encryptedBlobId": "blob=="})])
+    cover_client(yt).set_playlist_cover("VLPL1", b"jpeg")
+
+    (start_url, start_data, start_headers), (up_url, up_data, up_headers) = yt.posts
+    assert start_url.endswith("/playlist_image_upload/playlist_custom_thumbnail")
+    assert start_data == b""
+    assert start_headers["X-Goog-Upload-Command"] == "start"
+    assert start_headers["X-Goog-Upload-Header-Content-Length"] == "4"
+    assert start_headers["authorization"] == "SAPISIDHASH secret"
+    lowered = {k.lower(): v for k, v in start_headers.items()}
+    assert "content-encoding" not in lowered and "accept-encoding" not in lowered
+    assert lowered["content-type"].startswith("application/x-www-form-urlencoded")
+    assert (up_url, up_data) == (UPLOAD_URL, b"jpeg")
+    assert up_headers["X-Goog-Upload-Command"] == "upload, finalize"
+    assert up_headers["X-Goog-Upload-Offset"] == "0"
+
+    [(endpoint, body)] = yt.edits
+    assert endpoint == "browse/edit_playlist"
+    assert body["playlistId"] == "PL1"
+    [action] = body["actions"]
+    assert action["action"] == "ACTION_SET_CUSTOM_THUMBNAIL"
+    assert action["addedCustomThumbnail"]["playlistScottyEncryptedBlobId"] == "blob=="
+
+
+@pytest.mark.parametrize(
+    ("responses", "msg"),
+    [
+        ([FakeResponse(200)], "did not start the cover upload"),
+        (
+            [FakeResponse(headers={"X-Goog-Upload-URL": "https://evil.example/u"})],
+            "unexpected host",
+        ),
+        ([FakeResponse(403)], "cover upload returned HTTP 403"),
+        ([requests.ConnectionError("down")], "cover upload failed: down"),
+        ([started(), FakeResponse(400)], "cover upload returned HTTP 400"),
+        ([started(), FakeResponse(body=None)], "returned no image id"),
+        ([started(), FakeResponse(body={"other": 1})], "returned no image id"),
+    ],
+)
+def test_set_playlist_cover_upload_failures(responses: list, msg: str) -> None:
+    yt = CoverYT(responses)
+    with pytest.raises(ServiceError, match=msg):
+        cover_client(yt).set_playlist_cover("PL1", b"jpeg")
+    assert yt.edits == []
+
+
+def test_set_playlist_cover_refused_edit_is_not_an_auth_error() -> None:
+    yt = CoverYT(
+        [started(), FakeResponse(body={"encryptedBlobId": "b"})],
+        edit=YTMusicServerError("Server returned HTTP 403: Forbidden."),
+    )
+    with pytest.raises(ServiceError, match="phone-verified"):
+        cover_client(yt).set_playlist_cover("PL1", b"jpeg")
+
+
+def test_set_playlist_cover_unsuccessful_edit_is_a_service_error() -> None:
+    yt = CoverYT(
+        [started(), FakeResponse(body={"encryptedBlobId": "b"})], edit={"status": "STATUS_FAILED"}
+    )
+    with pytest.raises(ServiceError, match="set cover failed"):
+        cover_client(yt).set_playlist_cover("PL1", b"jpeg")

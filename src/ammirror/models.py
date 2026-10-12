@@ -3,6 +3,7 @@ import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _PUNCTUATION = str.maketrans(
     {
@@ -28,6 +29,20 @@ def natural_sort_key(name: str) -> tuple[str, str, str]:
     folded = normalize_playlist_name(name)
     core = _LEADING_PUNCTUATION.sub("", folded)
     return _DIGITS.sub(lambda m: m.group().zfill(20), core), folded, name
+
+
+def artwork_key(url: str) -> str:
+    """Identify artwork by its URL minus the signing parameters some hosts renew per request.
+
+    Apple serves custom playlist artwork from a blob store whose URLs carry a fresh
+    X-Amz-* signature on every read; comparing raw URLs would re-upload it every sync.
+    """
+    parts = urlsplit(url)
+    params = parse_qsl(parts.query, keep_blank_values=True)
+    kept = [(k, v) for k, v in params if not k.lower().startswith("x-amz-")]
+    if len(kept) == len(params):
+        return url
+    return urlunsplit(parts._replace(query=urlencode(kept)))
 
 
 @dataclass(frozen=True)
@@ -59,6 +74,7 @@ class ApplePlaylist:
     id: str
     name: str
     owner: PlaylistOwner = PlaylistOwner.YOURS
+    artwork_url: str | None = None  # a square image, ready to download
 
 
 @dataclass(frozen=True)
@@ -112,6 +128,7 @@ class PlaylistMapping:
     apple_playlist_id: str
     ytm_playlist_id: str
     apple_name: str
+    cover_key: str | None = None  # artwork_key of the cover last set on the copy
 
 
 @dataclass(frozen=True)
@@ -145,6 +162,13 @@ class RemoveItems:
 
 
 @dataclass(frozen=True)
+class SetCover:
+    apple_playlist_id: str
+    title: str
+    artwork_url: str
+
+
+@dataclass(frozen=True)
 class Like:
     video_id: str
     apple_id: str
@@ -160,7 +184,9 @@ class ForgetLike:
     video_id: str
 
 
-Op = CreatePlaylist | RenamePlaylist | AddItems | RemoveItems | Like | Unlike | ForgetLike
+Op = (
+    CreatePlaylist | RenamePlaylist | AddItems | RemoveItems | SetCover | Like | Unlike | ForgetLike
+)
 
 
 @dataclass(frozen=True)
