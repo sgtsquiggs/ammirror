@@ -23,8 +23,9 @@ follows. Every behaviour change needs a test.
 Commits follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
 The `commit-msg` hook runs [commitlint](https://commitlint.js.org/) through
 prek, with `@commitlint/config-conventional` (see `commitlint.config.mjs`).
-CI runs the same hook on every commit in a push or pull request. The hook
-needs Node.js; prek uses the one on your system, or installs one.
+CI runs the same hook on every commit pushed to `main` or in a pull request,
+except Dependabot's, whose bodies quote release notes past the length limits.
+The hook needs Node.js; prek uses the one on your system, or installs one.
 
 Besides the format and the types below, commitlint rejects a description that
 is empty, starts with a capital letter or ends with a period, an upper-case

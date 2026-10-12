@@ -25,7 +25,8 @@ for what the tool does and how it is installed.
 | `prek.toml` | Git hooks run by [prek](https://prek.j178.dev): ruff, pyright, file hygiene, commitlint. |
 | `commitlint.config.mjs` | Commit message rules (Conventional Commits) for the commitlint hook. |
 | `.github/scripts/check-commit-messages.sh` | Runs the commit-msg hook on each commit in a range; used by CI. |
-| `.github/workflows/ci.yml` | CI: prek hooks, commit message checks, tests. |
+| `.github/workflows/ci.yml` | CI: prek hooks, commit message checks, tests; runs on pushes to `main` and on pull requests. |
+| `.github/dependabot.yml` | Weekly uv and GitHub Actions updates, with Conventional Commits headers. |
 | `CONTRIBUTING.md` | Commit message format and the release process. |
 | `CHANGELOG.md` | User-visible changes per release (Keep a Changelog). |
 | `.editorconfig` | Indentation and line-ending rules for editors. |

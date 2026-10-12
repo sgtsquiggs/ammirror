@@ -1,0 +1,27 @@
+# Weekly dependency updates. ytmusicapi follows YouTube Music's internal API,
+# so a new release often fixes (or causes) a break; its PR runs the tests.
+# Commit messages use Conventional Commits types; commitlint.config.mjs skips
+# the long bodies Dependabot writes.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      dev-tools:
+        patterns: [pyright, pytest, ruff]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]

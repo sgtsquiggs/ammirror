@@ -1,15 +1,25 @@
 name: CI
 
 on:
+  # Other branches get CI through their pull request, so each commit runs once.
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
+# A newer push to a pull request supersedes its run in progress (each run
+# re-checks all of the PR's commits). Pushes to main never cancel each other:
+# each checks only the commit messages new since the previous push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   prek:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -28,6 +38,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         python: ["3.12", "3.14"]
